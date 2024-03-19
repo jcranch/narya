@@ -162,6 +162,16 @@ let rec check :
                 (* Here we don't need to slurp up lots of lambdas, but can make do with one. *)
                 (`Cube x, check status (Ctx.vis ctx (`Cube x) newnfs) body output) in
           Term.Lam (m, xs, cbody))
+  (* Checking a lambda at a higher-dimensional universe slurps up enough variables to be a full instantiation, then proceeds to check the body with a special flag that will only accept canonical type declarations.  Thus higher-dimensional universes act like function-types but only accept abstractions of generative canonical types in case trees; this restriction seems mandated by having something to do with degeneracies. *)
+  | Lam _, UU _, Kinetic -> fatal Universe_lambda_outside_case_tree
+  | Lam (_, `Cube, _), UU _, Potential _ ->
+      (* TODO: Should we allow "tube variables"? *)
+      fatal (Unimplemented "cube variables for universe abstractions")
+  | Lam ({ value = x; _ }, `Normal, body), UU dim, Potential _ -> (
+      match compare dim D.zero with
+      | Eq -> fatal (Checking_lambda_at_nonfunction (PUninst (ctx, uty)))
+      | Neq -> _)
+  (* TODO: Instantiation will also have to go into chaotic neutrals, detecting these abstractions and turning them lawful.  Does that mean alignments should be stored in Uninst and Inst, rather than in Neu?  If so, then instantiated higher-dimensional Pi-types could also have (lawful) alignments representing their nature as function-types.  (And, sort of, universes too, except that as noted above they only accept abstractions of generative canonical types in case trees.) *)
   | Lam _, _, _ -> fatal (Checking_lambda_at_nonfunction (PUninst (ctx, uty)))
   | Struct (Noeta, _), _, Kinetic ->
       fatal (Unimplemented "Comatching in terms (rather than case trees)")
@@ -525,10 +535,10 @@ let rec check :
         }
         ty
   | Empty_co_match, _, _ -> check status ctx { value = Struct (Noeta, Abwd.empty); loc = tm.loc } ty
-  | Codata (eta, cube, fields), UU m, Potential _ -> (
+  | Codata (eta, fields), UU m, Potential _ -> (
       match compare (TubeOf.inst tyargs) m with
       | Neq -> fatal (Dimension_mismatch ("checking codata", TubeOf.inst tyargs, m))
-      | Eq -> check_codata status ctx eta tyargs Emp cube (Bwd.to_list fields))
+      | Eq -> check_codata status ctx eta tyargs Emp (Bwd.to_list fields))
   | Codata _, _, Potential _ ->
       fatal (Checking_canonical_at_nonuniverse ("codatatype", PVal (ctx, ty)))
   | Codata _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "codatatype")
@@ -613,20 +623,19 @@ and get_indices :
   | _ -> fatal (Invalid_constructor_type c)
 
 and check_codata :
-    type a c ac b n.
+    type a b n.
     (b, potential) status ->
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
-    (a, ac) codata_vars ->
-    (Field.t * ac check located) list ->
+    (Field.t, ((b, D.zero) snoc, kinetic) term) Abwd.t ->
+    (Field.t * (string option * a N.suc check located)) list ->
     (b, potential) term =
- fun status ctx eta tyargs checked_fields cube raw_fields ->
+ fun status ctx eta tyargs checked_fields raw_fields ->
   let dim = TubeOf.inst tyargs in
   match (raw_fields, status) with
   | [], _ -> Canonical (Codata (eta, dim, checked_fields))
-  | (fld, rty) :: raw_fields, Potential (name, args, hyp) -> (
+  | (fld, (x, rty)) :: raw_fields, Potential (name, args, hyp) ->
       (* Temporarily bind the current constant to the up-until-now value. *)
       Global.run_with_definition name
         (Defined (hyp (Term.Canonical (Codata (eta, dim, checked_fields)))))
@@ -636,29 +645,10 @@ and check_codata :
       let alignment = Lawful (Codata { eta; env = Ctx.env ctx; ins; fields = checked_fields }) in
       let prev_ety =
         Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
-      let _, domvars =
-        dom_vars (Ctx.length ctx)
-          (TubeOf.plus_cube
-             (TubeOf.mmap { map = (fun _ [ nf ] -> nf.tm) } [ tyargs ])
-             (CubeOf.singleton prev_ety)) in
-      match cube with
-      | Cube x ->
-          let newctx = Ctx.vis ctx (`Cube x) domvars in
-          let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, (fld, cty)) in
-          check_codata status ctx eta tyargs checked_fields cube raw_fields
-      | Normal ({ value = ac; loc }, xs) -> (
-          let (Faces faces) = count_faces dim in
-          match N.compare (faces_out faces) (N.plus_right ac) with
-          | Eq ->
-              let newctx = Ctx.split ctx faces ac (vars_of_list dim (Bwv.to_list xs)) domvars in
-              let cty = check Kinetic newctx rty (universe D.zero) in
-              let checked_fields = Snoc (checked_fields, (fld, cty)) in
-              check_codata status ctx eta tyargs checked_fields cube raw_fields
-          | Lt _ | Gt _ ->
-              fatal ?loc
-                (Wrong_boundary_of_record (N.to_int (N.plus_right ac) - N.to_int (faces_out faces)))
-          ))
+      let newctx = Ctx.ext ctx x prev_ety in
+      let cty = check Kinetic newctx rty (universe D.zero) in
+      let checked_fields = Snoc (checked_fields, (fld, cty)) in
+      check_codata status ctx eta tyargs checked_fields raw_fields
 
 and check_struct :
     type a b c mn m n s.
@@ -668,7 +658,7 @@ and check_struct :
     (Field.t option, a check located) Abwd.t ->
     kinetic value ->
     (mn, m, n) insertion ->
-    (Field.t, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (Field.t, ((c, D.zero) snoc, kinetic) term) Abwd.t ->
     (b, s) term =
  fun status eta ctx tms ty ins fields ->
   let dim = cod_left_ins ins in

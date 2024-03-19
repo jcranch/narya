@@ -115,6 +115,7 @@ module Code = struct
     | Error_printing_error : t -> t
     | Checking_canonical_at_nonuniverse : string * printable -> t
     | Canonical_type_outside_case_tree : string -> t
+    | Universe_lambda_outside_case_tree : t
     | Wrong_boundary_of_record : int -> t
     | Invalid_constructor_type : Constr.t -> t
     | Missing_constructor_type : Constr.t -> t
@@ -203,6 +204,7 @@ module Code = struct
     | Error_printing_error _ -> Bug
     | Checking_canonical_at_nonuniverse _ -> Error
     | Canonical_type_outside_case_tree _ -> Error
+    | Universe_lambda_outside_case_tree -> Error
     | Wrong_boundary_of_record _ -> Error
     | Invalid_constructor_type _ -> Error
     | Missing_constructor_type _ -> Error
@@ -292,6 +294,7 @@ module Code = struct
     | Wrong_boundary_of_record _ -> "E1505"
     | Invalid_constructor_type _ -> "E1506"
     | Missing_constructor_type _ -> "E1507"
+    | Universe_lambda_outside_case_tree -> "E1508"
     (* Commands *)
     | Too_many_commands -> "E2000"
     (* def *)
@@ -495,6 +498,7 @@ module Code = struct
     | Checking_canonical_at_nonuniverse (tm, ty) ->
         textf "checking %s at non-universe %a" tm pp_printed (print ty)
     | Canonical_type_outside_case_tree str -> textf "type %s can only occur in case trees" str
+    | Universe_lambda_outside_case_tree -> text "universe abstractions can only occur in case trees"
     | Duplicate_method_in_codata fld ->
         textf "duplicate method in codatatype: %s" (Field.to_string fld)
     | Duplicate_field_in_record fld ->

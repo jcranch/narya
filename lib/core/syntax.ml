@@ -49,9 +49,7 @@ module Raw = struct
     (* "[]", which could be either an empty match or an empty comatch *)
     | Empty_co_match : 'a check
     | Data : (Constr.t, 'a dataconstr located) Abwd.t -> 'a check
-    | Codata :
-        potential eta * ('a, 'ac) codata_vars * (Field.t, 'ac check located) Abwd.t
-        -> 'a check
+    | Codata : potential eta * (Field.t, string option * 'a N.suc check located) Abwd.t -> 'a check
 
   and _ branch =
     (* The location of the third argument is that of the entire pattern. *)
@@ -63,12 +61,6 @@ module Raw = struct
         -> 'a branch
 
   and _ dataconstr = Dataconstr : ('a, 'b, 'ab) tel * 'ab check located option -> 'a dataconstr
-
-  (* A normal codatatype binds one more "self" variable in the types of its fields.  A normal record type does the same, except that the user doesn't have a name for that variable and instead accesses it by lexical variables that postprocess to its fields using Varscope. *)
-  and (_, _) codata_vars =
-    | Cube : string option -> ('a, 'a N.suc) codata_vars
-    (* A higher-dimensional codatatype simply binds a "self" cube of variables, but unfortunately a higher-dimensional record type doesn't have any variable to make a cube.  So we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one.  (TODO: This Bwv really ought to be a forwards Vec, but that would require changing too much else for now, such as making count_faces return a Fwn.) *)
-    | Normal : ('a, 'c, 'ac) N.plus located * (string option, 'c) Bwv.t -> ('a, 'ac) codata_vars
 
   (* An ('a, 'b, 'ab) tel is a raw telescope of length 'b in context 'a, with 'ab = 'a+'b the extended context. *)
   and (_, _, _) tel =
@@ -151,7 +143,7 @@ module rec Term : sig
   and _ canonical =
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
+        potential eta * 'n D.t * (Field.t, (('a, D.zero) snoc, kinetic) term) Abwd.t
         -> 'a canonical
 
   and (_, _) dataconstr =
@@ -216,7 +208,7 @@ end = struct
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields). *)
     | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
+        potential eta * 'n D.t * (Field.t, (('a, D.zero) snoc, kinetic) term) Abwd.t
         -> 'a canonical
 
   (* A datatype constructor has a telescope of arguments and a list of index values depending on those arguments. *)
@@ -350,7 +342,7 @@ module rec Value : sig
         eta : potential eta;
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.t, (('a, D.zero) snoc, kinetic) term) Abwd.t;
       }
         -> canonical
 
@@ -470,7 +462,7 @@ end = struct
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.t, (('a, D.zero) snoc, kinetic) term) Abwd.t;
       }
         -> canonical
 

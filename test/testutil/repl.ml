@@ -155,4 +155,4 @@ let rec run f =
      ]" *)
 
 let gel_install () =
-  def "Gel" "(A B : Type) (R : A → B → Type) → Id Type A B" "A B R ↦ sig a b ↦ ( ungel : R a b )"
+  def "Gel" "(A B : Type) (R : A → B → Type) → Id Type A B" "A B R a b ↦ sig ( ungel : R a b )"

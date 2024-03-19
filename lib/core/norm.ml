@@ -425,18 +425,14 @@ and tyof_field_withname ?severity (tm : kinetic value) (ty : kinetic value) (fld
           (* The type of the field projection comes from the type associated to that field name in general, evaluated at the supplied parameters along with the term itself and its boundaries. *)
           let tyargs' = TubeOf.plus_cube (val_of_norm_tube tyargs) (CubeOf.singleton tm) in
           let entries =
-            CubeOf.build n
-              {
-                build =
-                  (fun fb ->
-                    CubeOf.build m
-                      {
-                        build =
-                          (fun fa ->
-                            let (Plus pq) = D.plus (dom_sface fb) in
-                            CubeOf.find tyargs' (sface_plus_sface fa mn pq fb));
-                      });
-              } in
+            CubeOf.singleton
+              (CubeOf.build m
+                 {
+                   build =
+                     (fun fa ->
+                       let (Plus pq) = D.plus n in
+                       CubeOf.find tyargs' (sface_plus fa mn pq));
+                 }) in
           let env = Value.Ext (env, entries) in
           match Field.find fields fld with
           | Some (fldname, fldty) ->
