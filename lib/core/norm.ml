@@ -8,7 +8,6 @@ open Term
 open Value
 open Inst
 open Act
-open Permute
 
 (* Evaluation of terms and evaluation of case trees are technically separate things.  In particular, evaluating a kinetic (standard) term always produces just a value, whereas evaluating a potential term (a function case tree) can either
 
@@ -22,32 +21,31 @@ open Permute
 let lookup : type n b. (n, b) env -> b index -> kinetic value =
  fun env v ->
   (* We traverse the environment, accumulating operator actions and shifts as we go, until we find the specified index. *)
-  let rec lookup :
-      type m n k b kb. (n, b) env -> (k, b, kb) Plusmap.t -> kb index -> (m, n) op -> kinetic value
-      =
-   fun env kb v op ->
-    match (env, v, kb) with
+  let rec lookup : type m n k nk b kb. (n, b) env -> b index -> (m, n) op -> kinetic value =
+   fun env v op ->
+    match (env, v) with
     (* Since there's an index, the environment can't be empty. *)
-    | Emp _, _, Map_emp -> .
+    | Emp _, _ -> .
     (* If we encounter an operator action, we accumulate it. *)
-    | Act (env, op'), _, _ -> lookup env kb v (comp_op op' op)
-    (* If we encounter a shift, we extend the accumulated operator by the identity.  (We also do some associativity arithmetic to continue to remember that we have a plusmap.) *)
-    | Shift (env, nk_l, lb), _, _ ->
-        let l = D.plus_right nk_l in
-        let (Plus kl) = D.plus l in
-        let klb = kb in
-        let (Plus ml) = D.plus l in
-        lookup env (Plusmap.assocl kl lb klb) v (op_plus_op op nk_l ml (id_op l))
+    | Act (env, op'), _ -> lookup env v (comp_op op' op)
+    (* If we encounter a shift, we split the face associated to our index and accumulate part of it into the operator. *)
+    | Shift (env, mn, nb), Index (v, fab) ->
+        let (Unmap_insert (nk, v, _)) = Plusmap.unmap_insert v nb in
+        let (SFace_of_plus (_, fa, fb)) = sface_of_plus nk fab in
+        let (Plus x) = D.plus (dom_sface fa) in
+        lookup env (Index (v, fb)) (op_plus_op op mn x (op_of_sface fa))
+    (* If the environment is permuted, we apply the permutation to the index. *)
+    | Permute (p, env), Index (v, fa) ->
+        let (Permute_insert (v, _)) = Tbwd.permute_insert v p in
+        lookup env (Index (v, fa)) op
     (* If we encounter a variable that isn't ours, we skip it and proceed. *)
-    | Ext (env, _), Index (Later v, fa), Map_snoc (kb, _) -> lookup env kb (Index (v, fa)) op
+    | Ext (env, _), Index (Later v, fa) -> lookup env (Index (v, fa)) op
     (* Finally, when we find our variable, we decompose the accumulated operator into a strict face and degeneracy, use the face as an index lookup, and act by the degeneracy. *)
-    | Ext (_, entry), Index (Now, fa), _ -> (
+    | Ext (_, entry), Index (Now, fa) ->
         let (Op (f, s)) = op in
-        match compare (cod_sface fa) (CubeOf.dim entry) with
-        | Eq -> act_value (CubeOf.find (CubeOf.find entry fa) f) s
-        | Neq -> fatal (Dimension_mismatch ("lookup", cod_sface fa, CubeOf.dim entry))) in
+        act_value (CubeOf.find (CubeOf.find entry fa) f) s in
   let n = dim_env env in
-  lookup env (Plusmap.zerol (length_env env)) v (id_op n)
+  lookup env v (id_op n)
 
 (* The master evaluation function. *)
 let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
@@ -264,7 +262,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                   (* If we have a branch with a matching constant, then our constructor must be applied to exactly the right number of elements (in dargs).  In that case, we pick them out and add them to the environment. *)
                   let env = take_args env mn dargs plus in
                   (* Then we proceed recursively with the body of that branch. *)
-                  eval (permute_env perm env) body
+                  eval (Permute (perm, env)) body
               | _ -> Unrealized))
       | _ -> Unrealized)
   | Realize tm ->

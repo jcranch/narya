@@ -14,6 +14,9 @@ type (_, _) env_decomp =
       ('n, 'b) env * ('k, ('n, kinetic value) CubeOf.t) CubeOf.t
       -> ('n, ('b, 'k) snoc) env_decomp
 
+(* Select and remove an arbitrary entry from an environment. *)
+type (_, _) selected = Selected : ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('k, 'n) selected
+
 let rec env_top : type n a. (n, a) env -> (n, a) env_decomp = function
   | Emp n -> Emp n
   | Ext (env, xs) -> Ext (env, xs)
@@ -49,13 +52,10 @@ let rec env_top : type n a. (n, a) env -> (n, a) env_decomp = function
                               CubeOf.find (CubeOf.find xs fc) (sface_plus_sface fa m_n p fb));
                         });
                 } ))
-
-(* Select and remove an arbitrary entry from an environment. *)
-type (_, _) selected = Selected : ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('k, 'n) selected
+  | Permute (p, env) -> env_top (permute_env p env)
 
 (* Note that the return entry is n-dimensional, since all the operator actions have to be applied as we pull it out. *)
-let rec select_env :
-    type a b n k. (a, k, b) Tbwd.insert -> (n, b) env -> (n, a) env * (k, n) selected =
+and select_env : type a b n k. (a, k, b) Tbwd.insert -> (n, b) env -> (n, a) env * (k, n) selected =
  fun ins env ->
   match ins with
   | Now ->
@@ -67,7 +67,7 @@ let rec select_env :
       (Ext (env, top), sel)
 
 (* Permute an environment.  The delayed actions and shifts in the input environment are preserved in the leftmost part of the permutation that's the identity, but all the others are applied to the terms in the process of permuting. *)
-let rec permute_env : type a b n. (a, b) Tbwd.permute -> (n, b) env -> (n, a) env =
+and permute_env : type a b n. (a, b) Tbwd.permute -> (n, b) env -> (n, a) env =
  fun perm env ->
   match perm with
   | Id -> env
