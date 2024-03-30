@@ -24,8 +24,8 @@ let lookup : type n. n t -> n index -> string list =
    fun ctx x ->
     match (ctx, x) with
     | Emp, _ -> .
-    | Snoc (ctx, _), Pop x -> lookup ctx x
-    | Snoc (_, Variables (_, mn, xs)), Top fa -> (
+    | Snoc (ctx, _), Index (Later x, fa) -> lookup ctx (Index (x, fa))
+    | Snoc (_, Variables (_, mn, xs)), Index (Now, fa) -> (
         let (SFace_of_plus (_, fb, fc)) = sface_of_plus mn fa in
         match CubeOf.find xs fc with
         | Some x -> cubevar x fb

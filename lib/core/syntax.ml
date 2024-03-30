@@ -116,9 +116,7 @@ module rec Term : sig
 
   module CodCube : module type of Cube (CodFam)
 
-  type 'a index =
-    | Top : ('k, 'n) sface -> ('a, 'n) snoc index
-    | Pop : 'xs index -> ('xs, 'x) snoc index
+  type _ index = Index : ('a, 'n, 'b) Tbwd.insert * ('k, 'n) sface -> 'b index
 
   type (_, _) term =
     | Var : 'a index -> ('a, kinetic) term
@@ -171,10 +169,8 @@ end = struct
 
   module CodCube = Cube (CodFam)
 
-  (* A typechecked De Bruijn index is a well-scoped natural number together with a definite strict face (the top face, if none was supplied explicitly).  Unlike a raw De Bruijn index, the scoping is by an hctx rather than a type-level nat.  This allows the face to also be well-scoped: its codomain must be the dimension appearing in the hctx at that position. *)
-  type 'a index =
-    | Top : ('k, 'n) sface -> ('a, 'n) snoc index
-    | Pop : 'xs index -> ('xs, 'x) snoc index
+  (* A typechecked De Bruijn index is a well-scoped natural number together with a definite strict face (the top face, if none was supplied explicitly).  Unlike a raw De Bruijn index, the scoping is by a tbwd rather than a type-level nat.  This allows the face to also be well-scoped: its codomain must be the dimension appearing in the hctx at that position.  And since we already have defined Tbwd.insert, we can re-use that instead of re-defining this inductively. *)
+  type _ index = Index : ('a, 'n, 'b) Tbwd.insert * ('k, 'n) sface -> 'b index
 
   type (_, _) term =
     (* Most term-formers only appear in kinetic (ordinary) terms. *)

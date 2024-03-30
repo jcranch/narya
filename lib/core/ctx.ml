@@ -144,8 +144,8 @@ module Ordered = struct
         | _ -> .)
     | Snoc (ctx, Vis (m, mn, af, _, xs), pf) -> lookup_face pf (sfaces af) ctx m mn xs k
     | Snoc (ctx, Invis _, Zero) ->
-        let j, x, v = lookup ctx k in
-        (j, x, Pop v)
+        let j, x, Index (v, fa) = lookup ctx k in
+        (j, x, Index (Later v, fa))
 
   and lookup_face :
       type a f af b m n mn.
@@ -160,8 +160,8 @@ module Ordered = struct
    fun pf sf ctx m mn xs k ->
     match (pf, sf) with
     | Zero, Emp ->
-        let i, x, v = lookup ctx k in
-        (i, x, Pop v)
+        let i, x, Index (v, fa) = lookup ctx k in
+        (i, x, Index (Later v, fa))
     | Suc pf, Snoc (sf, SFace_of fb) -> (
         match k with
         | Pop k, fa -> lookup_face pf sf ctx m mn xs (k, fa)
@@ -170,14 +170,14 @@ module Ordered = struct
             let (Plus kl) = D.plus (dom_sface fb) in
             let fab = sface_plus_sface fa mn kl fb in
             let x = CubeOf.find xs fab in
-            (Binding.level x, Binding.value x, Top fab)
+            (Binding.level x, Binding.value x, Index (Now, fab))
         | Top, Some (Any_sface fa) -> (
             match compare (cod_sface fa) m with
             | Eq ->
                 let (Plus kl) = D.plus (dom_sface fb) in
                 let fab = sface_plus_sface fa mn kl fb in
                 let x = CubeOf.find xs fab in
-                (Binding.level x, Binding.value x, Top fab)
+                (Binding.level x, Binding.value x, Index (Now, fab))
             | Neq -> fatal (Invalid_variable_face (D.zero, fa))))
 
   (* Look up a De Bruijn level in a context and find the corresponding possibly-invisible index, if one exists. *)
@@ -197,12 +197,14 @@ module Ordered = struct
     match
       miterM
         {
-          it = (fun fa [ x ] s -> if Binding.level x = Some i then ((), Some (Top fa)) else ((), s));
+          it =
+            (fun fa [ x ] s ->
+              if Binding.level x = Some i then ((), Some (Index (Now, fa))) else ((), s));
         }
         [ vars ] None
     with
     | (), Some v -> Some v
-    | (), None -> Option.map (fun v -> Pop v) (find_level ctx i)
+    | (), None -> Option.map (fun (Index (v, fa)) -> Index (Later v, fa)) (find_level ctx i)
 
   (* Every context has an underlying environment that substitutes each (level) variable for itself (index).  This environment ALWAYS HAS DIMENSION ZERO, and therefore in particular the variables don't need to come with any boundaries. *)
   let rec env : type a b. (a, b) t -> (D.zero, b) env = function

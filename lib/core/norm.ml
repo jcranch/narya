@@ -39,9 +39,9 @@ let lookup : type n b. (n, b) env -> b index -> kinetic value =
         let (Plus ml) = D.plus l in
         lookup env (Plusmap.assocl kl lb klb) v (op_plus_op op nk_l ml (id_op l))
     (* If we encounter a variable that isn't ours, we skip it and proceed. *)
-    | Ext (env, _), Pop v, Map_snoc (kb, _) -> lookup env kb v op
+    | Ext (env, _), Index (Later v, fa), Map_snoc (kb, _) -> lookup env kb (Index (v, fa)) op
     (* Finally, when we find our variable, we decompose the accumulated operator into a strict face and degeneracy, use the face as an index lookup, and act by the degeneracy. *)
-    | Ext (_, entry), Top fa, _ -> (
+    | Ext (_, entry), Index (Now, fa), _ -> (
         let (Op (f, s)) = op in
         match compare (cod_sface fa) (CubeOf.dim entry) with
         | Eq -> act_value (CubeOf.find (CubeOf.find entry fa) f) s
