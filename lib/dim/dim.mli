@@ -470,6 +470,28 @@ module Plusmap : sig
   val out : 'p D.t -> 'xs OfDom.t -> ('p, 'xs, 'ys) t -> 'ys OfCod.t
   val uniq : ('p, 'xs, 'ys) t -> ('p, 'xs, 'zs) t -> ('ys, 'zs) Monoid.eq
 
+  type (_, _, _, _) map_insert =
+    | Map_insert : ('zs, 'fx, 'ws) Tbwd.insert * ('p, 'ys, 'ws) t -> ('p, 'fx, 'ys, 'zs) map_insert
+
+  val insert :
+    ('p, 'x, 'z) D.plus ->
+    ('xs, 'x, 'ys) Tbwd.insert ->
+    ('p, 'xs, 'zs) t ->
+    ('p, 'z, 'ys, 'zs) map_insert
+
+  type (_, _, _, _) unmap_insert =
+    | Unmap_insert :
+        ('p, 'x, 'z) D.plus * ('xs, 'x, 'ys) Tbwd.insert * ('p, 'xs, 'zs) t
+        -> ('p, 'z, 'ys, 'zs) unmap_insert
+
+  val unmap_insert :
+    ('zs, 'z, 'ws) Tbwd.insert -> ('p, 'ys, 'ws) t -> ('p, 'z, 'ys, 'zs) unmap_insert
+
+  type (_, _, _) map_permute =
+    | Map_permute : ('p, 'zs, 'ws) t * ('ys, 'ws) Tbwd.permute -> ('p, 'zs, 'ys) map_permute
+
+  val permute : ('p, 'xs, 'ys) t -> ('xs, 'zs) Tbwd.permute -> ('p, 'zs, 'ys) map_permute
+
   val assocl :
     ('a, 'b, 'ab) D.plus -> ('b, 'cs, 'bcs) t -> ('a, 'bcs, 'abcs) t -> ('ab, 'cs, 'abcs) t
 

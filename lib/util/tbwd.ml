@@ -36,7 +36,7 @@ module Tbwd = struct
         let (Snocs p) = snocs b in
         Snocs (Suc p)
 
-  (* ('a, 'n, 'b) insert says that 'b is obtained by inserting a dimension 'n somewhere in 'a.  Or, put differently, 'a is obtained from 'b by deleting a dimension 'n from somewhere. *)
+  (* ('a, 'n, 'b) insert says that 'b is obtained by inserting a type 'n somewhere in 'a.  Or, put differently, 'a is obtained from 'b by deleting a type 'n from somewhere. *)
   type (_, _, _) insert =
     | Now : ('a, 'n, ('a, 'n) snoc) insert
     | Later : ('a, 'n, 'b) insert -> (('a, 'k) snoc, 'n, ('b, 'k) snoc) insert
@@ -276,6 +276,40 @@ module Tbwd = struct
 
   module Of (P : Predicate) = struct
     type _ t = Of_emp : emp t | Of_snoc : 'xs t * 'x P.t -> ('xs, 'x) snoc t
+
+    let rec insert : type a n b. (a, n, b) insert -> a t -> n P.t -> b t =
+     fun i a n ->
+      match i with
+      | Now -> Of_snoc (a, n)
+      | Later i ->
+          let (Of_snoc (a, k)) = a in
+          Of_snoc (insert i a n, k)
+
+    let rec uninsert : type a n b. (a, n, b) insert -> b t -> a t =
+     fun i b ->
+      match i with
+      | Now ->
+          let (Of_snoc (b, _)) = b in
+          b
+      | Later i ->
+          let (Of_snoc (b, n)) = b in
+          Of_snoc (uninsert i b, n)
+
+    let rec inserted : type a n b. (a, n, b) insert -> b t -> n P.t =
+     fun i b ->
+      match i with
+      | Now ->
+          let (Of_snoc (_, n)) = b in
+          n
+      | Later i ->
+          let (Of_snoc (b, _)) = b in
+          inserted i b
+
+    let rec permute : type a b. (a, b) permute -> b t -> a t =
+     fun p b ->
+      match p with
+      | Id -> b
+      | Insert (p, i) -> Of_snoc (permute p (uninsert i b), inserted i b)
   end
 
   (* Map a type-level function. *)
@@ -325,5 +359,50 @@ module Tbwd = struct
           let Eq = uniq fxs fxs' in
           let Eq = F.uniq fx fx' in
           Eq
+
+    type (_, _, _, _) map_insert =
+      | Map_insert : ('zs, 'fx, 'ws) insert * ('p, 'ys, 'ws) t -> ('p, 'fx, 'ys, 'zs) map_insert
+
+    let rec insert :
+        type p xs x z ys zs.
+        (p, x, z) F.t -> (xs, x, ys) insert -> (p, xs, zs) t -> (p, z, ys, zs) map_insert =
+     fun z i fxs ->
+      match i with
+      | Now -> Map_insert (Now, Map_snoc (fxs, z))
+      | Later i ->
+          let (Map_snoc (fxs, fx)) = fxs in
+          let (Map_insert (fi, fxs)) = insert z i fxs in
+          Map_insert (Later fi, Map_snoc (fxs, fx))
+
+    type (_, _, _, _) unmap_insert =
+      | Unmap_insert :
+          ('p, 'x, 'z) F.t * ('xs, 'x, 'ys) insert * ('p, 'xs, 'zs) t
+          -> ('p, 'z, 'ys, 'zs) unmap_insert
+
+    let rec unmap_insert :
+        type p ys z zs ws. (zs, z, ws) insert -> (p, ys, ws) t -> (p, z, ys, zs) unmap_insert =
+     fun i fxs ->
+      match i with
+      | Now ->
+          let (Map_snoc (fxs, fx)) = fxs in
+          Unmap_insert (fx, Now, fxs)
+      | Later i ->
+          let (Map_snoc (fxs, fx)) = fxs in
+          let (Unmap_insert (fx', fi, fxs)) = unmap_insert i fxs in
+          Unmap_insert (fx', Later fi, Map_snoc (fxs, fx))
+
+    type (_, _, _) map_permute =
+      | Map_permute : ('p, 'zs, 'ws) t * ('ys, 'ws) permute -> ('p, 'zs, 'ys) map_permute
+
+    let rec permute : type p xs ys zs. (p, xs, ys) t -> (xs, zs) permute -> (p, zs, ys) map_permute
+        =
+     fun fxs pp ->
+      match pp with
+      | Id -> Map_permute (fxs, Id)
+      | Insert (pp, i) ->
+          let (Map_snoc (fxs, fx)) = fxs in
+          let (Map_permute (pfxs, qq)) = permute fxs pp in
+          let (Map_insert (pi, ifx)) = insert fx i pfxs in
+          Map_permute (ifx, Insert (qq, pi))
   end
 end
