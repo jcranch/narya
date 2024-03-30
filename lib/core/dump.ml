@@ -97,6 +97,7 @@ and env : type b n. formatter -> (n, b) env -> unit =
   | Emp d -> fprintf ppf "Emp %a" dim d
   | Ext (e, _) -> fprintf ppf "%a <: ?" env e
   | Act (e, Op (f, d)) -> fprintf ppf "%a <* (%s,%s)" env e (string_of_sface f) (string_of_deg d)
+  | Shift (e, mn, _) -> fprintf ppf "%a << %a" env e dim (D.plus_right mn)
 
 and term : type b s. formatter -> (b, s) term -> unit =
  fun ppf tm ->

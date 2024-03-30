@@ -21,20 +21,33 @@ open Permute
 (* Look up a value in an environment by variable index.  The result has to have a degeneracy action applied (from the actions stored in the environment).  Thus this depends on being able to act on a value by a degeneracy, so we can't define it until after act.ml is loaded (unless we do open recursive trickery). *)
 let lookup : type n b. (n, b) env -> b index -> kinetic value =
  fun env v ->
-  (* We traverse the environment, accumulating operator actions as we go, until we find the specified index. *)
-  let rec lookup : type m n b. (n, b) env -> b index -> (m, n) op -> kinetic value =
-   fun env v op ->
-    match (env, v) with
-    | Emp _, _ -> .
-    | Ext (_, entry), Top fa -> (
-        (* When we find our variable, we decompose the accumulated operator into a strict face and degeneracy. *)
+  (* We traverse the environment, accumulating operator actions and shifts as we go, until we find the specified index. *)
+  let rec lookup :
+      type m n k b kb. (n, b) env -> (k, b, kb) Plusmap.t -> kb index -> (m, n) op -> kinetic value
+      =
+   fun env kb v op ->
+    match (env, v, kb) with
+    (* Since there's an index, the environment can't be empty. *)
+    | Emp _, _, Map_emp -> .
+    (* If we encounter an operator action, we accumulate it. *)
+    | Act (env, op'), _, _ -> lookup env kb v (comp_op op' op)
+    (* If we encounter a shift, we extend the accumulated operator by the identity.  (We also do some associativity arithmetic to continue to remember that we have a plusmap.) *)
+    | Shift (env, nk_l, lb), _, _ ->
+        let l = D.plus_right nk_l in
+        let (Plus kl) = D.plus l in
+        let klb = kb in
+        let (Plus ml) = D.plus l in
+        lookup env (Plusmap.assocl kl lb klb) v (op_plus_op op nk_l ml (id_op l))
+    (* If we encounter a variable that isn't ours, we skip it and proceed. *)
+    | Ext (env, _), Pop v, Map_snoc (kb, _) -> lookup env kb v op
+    (* Finally, when we find our variable, we decompose the accumulated operator into a strict face and degeneracy, use the face as an index lookup, and act by the degeneracy. *)
+    | Ext (_, entry), Top fa, _ -> (
         let (Op (f, s)) = op in
         match compare (cod_sface fa) (CubeOf.dim entry) with
         | Eq -> act_value (CubeOf.find (CubeOf.find entry fa) f) s
-        | Neq -> fatal (Dimension_mismatch ("lookup", cod_sface fa, CubeOf.dim entry)))
-    | Ext (env, _), Pop v -> lookup env v op
-    | Act (env, op'), _ -> lookup env v (comp_op op' op) in
-  lookup env v (id_op (dim_env env))
+        | Neq -> fatal (Dimension_mismatch ("lookup", cod_sface fa, CubeOf.dim entry))) in
+  let n = dim_env env in
+  lookup env (Plusmap.zerol (length_env env)) v (id_op n)
 
 (* The master evaluation function. *)
 let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =

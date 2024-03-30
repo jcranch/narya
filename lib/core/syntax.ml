@@ -366,6 +366,7 @@ module rec Value : sig
     | Emp : 'n D.t -> ('n, emp) env
     | Ext : ('n, 'b) env * ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('n, ('b, 'k) snoc) env
     | Act : ('n, 'b) env * ('m, 'n) op -> ('m, 'b) env
+    | Shift : ('mn, 'b) env * ('m, 'n, 'mn) D.plus * ('n, 'b, 'nb) Plusmap.t -> ('m, 'nb) env
 end = struct
   (* Here is the recursive application of the functor Cube.  First we define a module to pass as its argument, with type defined to equal the yet-to-be-defined binder, referred to recursively. *)
   module BindFam = struct
@@ -489,6 +490,7 @@ end = struct
     (* Here the k-cube denotes a "cube variable" consisting of some number of "real" variables indexed by the faces of a k-cube, while each of them has an n-cube of values representing a value and its boundaries. *)
     | Ext : ('n, 'b) env * ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('n, ('b, 'k) snoc) env
     | Act : ('n, 'b) env * ('m, 'n) op -> ('m, 'b) env
+    | Shift : ('mn, 'b) env * ('m, 'n, 'mn) D.plus * ('n, 'b, 'nb) Plusmap.t -> ('m, 'nb) env
 end
 
 open Value
@@ -505,10 +507,18 @@ let rec dim_env : type n b. (n, b) env -> n D.t = function
   | Emp n -> n
   | Ext (e, _) -> dim_env e
   | Act (_, op) -> dom_op op
+  | Shift (e, mn, _) -> D.plus_left mn (dim_env e)
 
 (* And likewise every binder *)
 let dim_binder : type m s. (m, s) binder -> m D.t = function
   | Bind b -> dom_ins b.ins
+
+(* The length of an environment is a tbwd of dimensions. *)
+let rec length_env : type n b. (n, b) env -> b Plusmap.OfDom.t = function
+  | Emp _ -> Of_emp
+  | Ext (env, x) -> Of_snoc (length_env env, CubeOf.dim x)
+  | Act (env, _) -> length_env env
+  | Shift (env, mn, nb) -> Plusmap.out (D.plus_right mn) (length_env env) nb
 
 (* Project out a cube or tube of values from a cube or tube of normals *)
 let val_of_norm_cube : type n. (n, normal) CubeOf.t -> (n, kinetic value) CubeOf.t =
