@@ -1,6 +1,7 @@
 open Bwd
 open Util
 open Tlist
+open Tbwd
 open Monoid
 module D : MonoidPos
 
@@ -454,6 +455,26 @@ type (_, _, _) insfact_comp =
       -> ('n, 'k, 'a) insfact_comp
 
 val insfact_comp : ('nk, 'n, 'k) insertion -> ('a, 'b) deg -> ('n, 'k, 'a) insfact_comp
+
+module Plusmap : sig
+  module OfDom : module type of Tbwd.Of (D)
+  module OfCod : module type of Tbwd.Of (D) with type 'a t = 'a OfDom.t
+
+  type ('a, 'b, 'c) t =
+    | Map_emp : ('p, emp, emp) t
+    | Map_snoc : ('p, 'xs, 'ys) t * ('p, 'x, 'y) D.plus -> ('p, ('xs, 'x) snoc, ('ys, 'y) snoc) t
+
+  type ('a, 'b) exists = Exists : 'ys OfCod.t * ('p, 'xs, 'ys) t -> ('p, 'xs) exists
+
+  val exists : 'p D.t -> 'xs OfDom.t -> ('p, 'xs) exists
+  val out : 'p D.t -> 'xs OfDom.t -> ('p, 'xs, 'ys) t -> 'ys OfCod.t
+  val uniq : ('p, 'xs, 'ys) t -> ('p, 'xs, 'zs) t -> ('ys, 'zs) Monoid.eq
+
+  val assocl :
+    ('a, 'b, 'ab) D.plus -> ('b, 'cs, 'bcs) t -> ('a, 'bcs, 'abcs) t -> ('ab, 'cs, 'abcs) t
+
+  val zerol : 'bs OfDom.t -> (D.zero, 'bs, 'bs) t
+  end
 
 (*  *)
 val one : one D.t
