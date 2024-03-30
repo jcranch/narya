@@ -268,4 +268,62 @@ module Tbwd = struct
         let q = permute_flatten ms ns p in
         let j = index_of_flattened_insert i ns in
         N.insert_plus q j m n
+
+  (* Tbwds of types satisfying a predicate. *)
+  module type Predicate = sig
+    type 'a t
+  end
+
+  module Of (P : Predicate) = struct
+    type _ t = Of_emp : emp t | Of_snoc : 'xs t * 'x P.t -> ('xs, 'x) snoc t
+  end
+
+  (* Map a type-level function. *)
+  module type TFun = sig
+    module Dom : Predicate
+    module Cod : Predicate
+
+    (* We add an extra parameter because we want to get out, in particular, a map of monoid addition parametrized by the thing being added, and once a type is wrapped in a module there's no way to get it out as a parameter. *)
+    type 'p param
+    type ('p, 'a, 'b) t
+    type (_, _) exists = Exists : 'b Cod.t * ('p, 'a, 'b) t -> ('p, 'a) exists
+
+    val exists : 'p param -> 'a Dom.t -> ('p, 'a) exists
+    val out : 'p param -> 'a Dom.t -> ('p, 'a, 'b) t -> 'b Cod.t
+    val uniq : ('p, 'a, 'b1) t -> ('p, 'a, 'b2) t -> ('b1, 'b2) Monoid.eq
+  end
+
+  module Map (F : TFun) = struct
+    module OfDom = Of (F.Dom)
+    module OfCod = Of (F.Cod)
+
+    type (_, _, _) t =
+      | Map_emp : ('p, emp, emp) t
+      | Map_snoc : ('p, 'xs, 'ys) t * ('p, 'x, 'y) F.t -> ('p, ('xs, 'x) snoc, ('ys, 'y) snoc) t
+
+    let rec out : type p xs ys. p F.param -> xs OfDom.t -> (p, xs, ys) t -> ys OfCod.t =
+     fun p xs pxs ->
+      match (xs, pxs) with
+      | Of_emp, Map_emp -> Of_emp
+      | Of_snoc (xs, x), Map_snoc (pxs, px) -> Of_snoc (out p xs pxs, F.out p x px)
+
+    type (_, _) exists = Exists : 'ys OfCod.t * ('p, 'xs, 'ys) t -> ('p, 'xs) exists
+
+    let rec exists : type p xs. p F.param -> xs OfDom.t -> (p, xs) exists =
+     fun p -> function
+      | Of_emp -> Exists (Of_emp, Map_emp)
+      | Of_snoc (xs, x) ->
+          let (Exists (ys, fxs)) = exists p xs in
+          let (Exists (y, fx)) = F.exists p x in
+          Exists (Of_snoc (ys, y), Map_snoc (fxs, fx))
+
+    let rec uniq : type p xs ys zs. (p, xs, ys) t -> (p, xs, zs) t -> (ys, zs) Monoid.eq =
+     fun fxs fxs' ->
+      match (fxs, fxs') with
+      | Map_emp, Map_emp -> Eq
+      | Map_snoc (fxs, fx), Map_snoc (fxs', fx') ->
+          let Eq = uniq fxs fxs' in
+          let Eq = F.uniq fx fx' in
+          Eq
+  end
 end
