@@ -60,3 +60,13 @@ val bind_some : eval_readback -> (level -> normal option) -> ('a, 'e) t -> ('a, 
 val names : ('a, 'b) t -> 'b Names.t
 val lookup_name : ('a, 'b) t -> 'b index -> string list
 val lam : ('a, 'b) t -> ('b, potential) term -> (emp, potential) term
+
+type readback = {
+  nf : 'a 'b. ('a, 'b) t -> normal -> ('b, kinetic) term;
+  ty : 'a 'b. ('a, 'b) t -> kinetic value -> ('b, kinetic) term;
+}
+
+type (_, _, _) degenerate =
+  | Degenerate : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) t * ('k, 'b) env -> ('a, 'b, 'k) degenerate
+
+val degenerate : readback -> ('a, 'b) t -> 'k D.t -> ('a, 'b, 'k) degenerate

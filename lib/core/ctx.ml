@@ -83,7 +83,7 @@ let raw_entry : type f n. (f, n) entry -> f N.t = function
   | Vis (_, _, f, _, _) -> faces_out f
   | Invis _ -> N.zero
 
-let _dim_entry : type f n. (f, n) entry -> n D.t = function
+let dim_entry : type f n. (f, n) entry -> n D.t = function
   | Vis (_, _, _, _, x) | Invis x -> CubeOf.dim x
 
 let app_entry : type f n. (f, n) entry -> app = function
@@ -521,6 +521,93 @@ module Ordered = struct
         let checked_perm = Tbwd.append_append_permute checked_perm checked_append in
         Bind_some { raw_perm; checked_perm; oldctx; newctx }
     | None -> None
+
+  (* Degenerating contexts (for higher inductive and coinductive types).  This also requires eval-readback. *)
+
+  type readback = {
+    nf : 'a 'b. ('a, 'b) t -> normal -> ('b, kinetic) term;
+    ty : 'a 'b. ('a, 'b) t -> kinetic value -> ('b, kinetic) term;
+  }
+
+  let degenerate_binding :
+      type k n kn a b.
+      int ->
+      readback ->
+      k D.t ->
+      (k, n, kn) D.plus ->
+      (n, Binding.t) CubeOf.t ->
+      (a, b) t ->
+      (k, b) env ->
+      (kn, Binding.t) CubeOf.t * (n, (k, kinetic value) CubeOf.t) CubeOf.t =
+   fun i readback k kn xs ctx env ->
+    let readbacks =
+      CubeOf.mmap
+        {
+          map =
+            (fun _ [ x ] ->
+              let nf = Binding.value x in
+              match Binding.level x with
+              | None -> (Some (readback.nf ctx nf), readback.ty ctx nf.ty)
+              | Some _ -> (None, readback.ty ctx nf.ty));
+        }
+        [ xs ] in
+    let j = ref 0 in
+    let newxs =
+      CubeOf.build (D.plus_out k kn)
+        {
+          build =
+            (fun fab ->
+              let (SFace_of_plus (_, fa, fb)) = sface_of_plus kn fab in
+              match CubeOf.find readbacks fb with
+              | None, ty ->
+                  let level = (i, !j) in
+                  j := !j + 1;
+                  let ty = Norm.eval_term (Act (env, op_of_sface fa)) ty in
+                  Binding.make (Some level) { tm = var level ty; ty }
+              | Some tm, ty ->
+                  (* Not really necessary *)
+                  j := !j + 1;
+                  let tm = Norm.eval_term (Act (env, op_of_sface fa)) tm in
+                  let ty = Norm.eval_term (Act (env, op_of_sface fa)) ty in
+                  Binding.make None { tm; ty });
+        } in
+    let newvals =
+      CubeOf.build (D.plus_right kn)
+        {
+          build =
+            (fun fb ->
+              CubeOf.build k
+                {
+                  build =
+                    (fun fa ->
+                      let (Plus ij) = D.plus (dom_sface fb) in
+                      (Binding.value (CubeOf.find newxs (sface_plus_sface fa kn ij fb))).tm);
+                });
+        } in
+    (newxs, newvals)
+
+  type (_, _, _) degenerate =
+    | Degenerate : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) t * ('k, 'b) env -> ('a, 'b, 'k) degenerate
+
+  let rec degenerate : type a b k. readback -> (a, b) t -> k D.t -> (a, b, k) degenerate =
+   fun readback ctx k ->
+    match ctx with
+    | Emp -> Degenerate (Map_emp, Emp, Emp k)
+    | Snoc (ctx, entry, ax) ->
+        let (Degenerate (kb, newctx, env)) = degenerate readback ctx k in
+        let mn = dim_entry entry in
+        let (Plus k_mn) = D.plus mn in
+        let newentry, newenv =
+          match entry with
+          | Vis (m, mn, nf, vars, xs) ->
+              let (Plus km) = D.plus m in
+              let km_n = D.plus_assocl km mn k_mn in
+              let newxs, newval = degenerate_binding (length newctx) readback k k_mn xs ctx env in
+              (Vis (D.plus_out k km, km_n, nf, vars, newxs), Ext (env, newval))
+          | Invis xs ->
+              let newxs, newval = degenerate_binding (length newctx) readback k k_mn xs ctx env in
+              (Invis newxs, Ext (env, newval)) in
+        Degenerate (Map_snoc (kb, k_mn), Snoc (newctx, newentry, ax), newenv)
 end
 
 (* Now we define contexts that add a permutation of the raw indices. *)
@@ -594,3 +681,22 @@ let bind_some (f : eval_readback) g (Permute (p, ctx)) =
 let names (Permute (_, ctx)) = Ordered.names ctx
 let lookup_name (Permute (_, ctx)) i = Ordered.lookup_name ctx i
 let lam (Permute (_, ctx)) tm = Ordered.lam ctx tm
+
+type readback = {
+  nf : 'a 'b. ('a, 'b) t -> normal -> ('b, kinetic) term;
+  ty : 'a 'b. ('a, 'b) t -> kinetic value -> ('b, kinetic) term;
+}
+
+type (_, _, _) degenerate =
+  | Degenerate : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) t * ('k, 'b) env -> ('a, 'b, 'k) degenerate
+
+let degenerate : type a b k. readback -> (a, b) t -> k D.t -> (a, b, k) degenerate =
+ fun readback (Permute (p, ctx)) k ->
+  let (Degenerate (kb, newctx, env)) =
+    Ordered.degenerate
+      {
+        nf = (fun ctx x -> readback.nf (Permute (N.id_perm (Ordered.raw_length ctx), ctx)) x);
+        ty = (fun ctx x -> readback.ty (Permute (N.id_perm (Ordered.raw_length ctx), ctx)) x);
+      }
+      ctx k in
+  Degenerate (kb, Permute (p, newctx), env)
