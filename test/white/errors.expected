@@ -153,6 +153,16 @@
  1 | [ | | .head |-> 0 | .tail |-> f ]
    ^ parse error
 
+ ￫ error[E0206]
+ ￭ user-supplied term
+ 1 | f (x ↦ x^(1z2) )
+   ^ invalid degeneracy: (1z2)
+
+ ￫ error[E0206]
+ ￭ user-supplied term
+ 1 | f (x ↦ x^(2) )
+   ^ invalid degeneracy: (2)
+
  ￫ error[E0902]
  ￭ user-supplied term
  1 | ( fst ≔ a )

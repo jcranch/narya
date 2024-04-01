@@ -55,6 +55,8 @@ let () =
   let () = unsynth ~print:() "[ _ ↦ a ]" ~code:Parse_error in
   let () = unsynth ~print:() "[ (x) ↦ a ]" ~code:Parse_error in
   let () = unsynth ~print:() "[ | | .head |-> 0 | .tail |-> f ]" ~code:Parse_error in
+  let () = unsynth ~print:() "f (x ↦ x^(1z2) )" ~code:(Invalid_degeneracy "(1z2)") in
+  let () = unsynth ~print:() "f (x ↦ x^(2) )" ~code:(Invalid_degeneracy "(2)") in
 
   (* Records and datatypes *)
   Testutil.Repl.(
