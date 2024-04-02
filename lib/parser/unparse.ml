@@ -160,7 +160,7 @@ let rec get_spine :
     type b n.
     (n, kinetic) term ->
     [ `App of (n, kinetic) term * (n, kinetic) term Bwd.t
-    | `Field of (n, kinetic) term * Field.t * (n, kinetic) term Bwd.t ] =
+    | `Field of (n, kinetic) term * Field.checked * (n, kinetic) term Bwd.t ] =
  fun tm ->
   match tm with
   | App (fn, arg) -> (
@@ -245,7 +245,7 @@ let rec unparse :
                         | `Labeled ->
                             unlocated
                               (infix ~notn:coloneq ~ws:[]
-                                 ~first:(unlocated (Ident ([ Field.to_string fld ], [])))
+                                 ~first:(unlocated (Ident ([ Field.string_of_checked fld ], [])))
                                  ~inner:Emp ~last:tm ~left_ok:(No.le_refl No.minus_omega)
                                  ~right_ok:(No.le_refl No.minus_omega))
                         (* An unlabeled 1-tuple must be written (_ := M). *)
@@ -304,7 +304,7 @@ and unparse_spine :
     n Names.t ->
     [ `Term of (n, kinetic) term
     | `Constr of Constr.t
-    | `Field of (n, kinetic) term * Field.t
+    | `Field of (n, kinetic) term * Field.checked
     | `Degen of string
     | `Unparser of unparser ] ->
     unparser Bwd.t ->
@@ -328,7 +328,8 @@ and unparse_spine :
           match head with
           | `Term tm -> unparse vars tm li ri
           | `Constr c -> unlocated (Constr (Constr.to_string c, []))
-          | `Field (tm, fld) -> unparse_field (make_unparser vars tm) (Field.to_string fld) li ri
+          | `Field (tm, fld) ->
+              unparse_field (make_unparser vars tm) (Field.strings_of_checked fld) li ri
           | `Degen s -> unlocated (Ident ([ s ], []))
           | `Unparser tm -> tm.unparse li ri)
       | Snoc (args, arg) -> (
@@ -349,19 +350,19 @@ and unparse_spine :
 and unparse_field :
     type n lt ls rt rs.
     unparser ->
-    string ->
+    string * string list ->
     (lt, ls) Interval.tt ->
     (rt, rs) Interval.tt ->
     (lt, ls, rt, rs) parse located =
- fun tm fld li ri ->
+ fun tm (fld, pbij) li ri ->
   match (Interval.contains li No.plus_omega, Interval.contains ri No.plus_omega) with
   | Some left_ok, Some right_ok ->
       let fn = tm.unparse li Interval.plus_omega_only in
-      let arg = unlocated (Field (fld, [])) in
+      let arg = unlocated (Field (fld, pbij, [])) in
       unlocated (App { fn; arg; left_ok; right_ok })
   | _ ->
       let fn = tm.unparse Interval.plus_omega_only Interval.plus_omega_only in
-      let arg = unlocated (Field (fld, [])) in
+      let arg = unlocated (Field (fld, pbij, [])) in
       let left_ok = No.le_refl No.plus_omega in
       let right_ok = No.le_refl No.plus_omega in
       parenthesize (unlocated (App { fn; arg; left_ok; right_ok }))

@@ -378,7 +378,7 @@ and tyof_app :
   inst out out_args
 
 (* Compute a field of a structure, at a particular dimension. *)
-and field : kinetic value -> Field.t -> kinetic value =
+and field : kinetic value -> Field.checked -> kinetic value =
  fun tm fld ->
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
@@ -406,11 +406,16 @@ and field : kinetic value -> Field.t -> kinetic value =
           | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty))
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
-  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, `Name fld))
+  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, `Checked fld))
 
 (* Given a term and its record type, compute the type of a field projection.  The caller can control the severity of errors, depending on whether we're typechecking (Error) or normalizing (Bug, the default). *)
-and tyof_field_withname ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.or_index) :
-    Field.t * kinetic value =
+and tyof_field_withname :
+    ?severity:Asai.Diagnostic.severity ->
+    kinetic value ->
+    kinetic value ->
+    Field.any ->
+    Field.checked * kinetic value =
+ fun ?severity tm ty fld ->
   let (Fullinst (ty, tyargs)) = full_inst ?severity ty "tyof_field" in
   match ty with
   | Neu
@@ -464,8 +469,13 @@ and tyof_field_withname ?severity (tm : kinetic value) (ty : kinetic value) (fld
           | None -> fatal ?severity (No_such_field (`Record (PConstant const), fld))))
   | _ -> fatal ?severity (No_such_field (`Other, fld))
 
-and tyof_field ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.t) : kinetic value =
-  snd (tyof_field_withname ?severity tm ty (`Name fld))
+and tyof_field ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.checked) :
+    kinetic value =
+  snd (tyof_field_withname ?severity tm ty (`Checked fld))
+
+and tyof_field_raw ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.raw_or_index) :
+    Field.checked * kinetic value =
+  tyof_field_withname ?severity tm ty (fld :> Field.any)
 
 and eval_binder :
     type m n mn b s.

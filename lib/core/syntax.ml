@@ -31,7 +31,7 @@ module Raw = struct
   type _ synth =
     | Var : 'a index -> 'a synth
     | Const : Constant.t -> 'a synth
-    | Field : 'a synth located * Field.or_index -> 'a synth
+    | Field : 'a synth located * Field.raw_or_index -> 'a synth
     | Pi : string option * 'a check located * 'a N.suc check located -> 'a synth
     | App : 'a synth located * 'a check located -> 'a synth
     | Asc : 'a check located * 'a check located -> 'a synth
@@ -43,14 +43,14 @@ module Raw = struct
     | Synth : 'a synth -> 'a check
     | Lam : string option located * [ `Cube | `Normal ] * 'a N.suc check located -> 'a check
     (* A "Struct" is our current name for both tuples and comatches, which share a lot of their implementation even though they are conceptually and syntactically distinct.  Those with eta=`Eta are tuples, those with eta=`Noeta are comatches.  We index them by a "Field.t option" so as to include any unlabeled fields, with their relative order to the labeled ones. *)
-    | Struct : 's eta * (Field.t option, 'a check located) Abwd.t -> 'a check
+    | Struct : 's eta * (Field.raw option, 'a check located) Abwd.t -> 'a check
     | Constr : Constr.t located * 'a check located Bwd.t -> 'a check
     | Match : 'a index * 'a branch list -> 'a check
     (* "[]", which could be either an empty match or an empty comatch *)
     | Empty_co_match : 'a check
     | Data : (Constr.t, 'a dataconstr located) Abwd.t -> 'a check
     | Codata :
-        potential eta * ('a, 'ac) codata_vars * (Field.t, 'ac check located) Abwd.t
+        potential eta * ('a, 'ac) codata_vars * (Field.raw, 'ac check located) Abwd.t
         -> 'a check
 
   and _ branch =
@@ -121,7 +121,7 @@ module rec Term : sig
   type (_, _) term =
     | Var : 'a index -> ('a, kinetic) term
     | Const : Constant.t -> ('a, kinetic) term
-    | Field : ('a, kinetic) term * Field.t -> ('a, kinetic) term
+    | Field : ('a, kinetic) term * Field.checked -> ('a, kinetic) term
     | UU : 'n D.t -> ('a, kinetic) term
     | Inst : ('a, kinetic) term * ('m, 'n, 'mn, ('a, kinetic) term) TubeOf.t -> ('a, kinetic) term
     | Pi :
@@ -134,7 +134,9 @@ module rec Term : sig
         string option * ('a, kinetic) term * (('a, D.zero) snoc, kinetic) term
         -> ('a, kinetic) term
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * (Field.t, ('a, 's) term * [ `Labeled | `Unlabeled ]) Abwd.t -> ('a, 's) term
+    | Struct :
+        's eta * (Field.checked, ('a, 's) term * [ `Labeled | `Unlabeled ]) Abwd.t
+        -> ('a, 's) term
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
@@ -147,7 +149,7 @@ module rec Term : sig
   and _ canonical =
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
+        potential eta * 'n D.t * (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t
         -> 'a canonical
 
   and (_, _) dataconstr =
@@ -176,7 +178,7 @@ end = struct
     (* Most term-formers only appear in kinetic (ordinary) terms. *)
     | Var : 'a index -> ('a, kinetic) term
     | Const : Constant.t -> ('a, kinetic) term
-    | Field : ('a, kinetic) term * Field.t -> ('a, kinetic) term
+    | Field : ('a, kinetic) term * Field.checked -> ('a, kinetic) term
     | UU : 'n D.t -> ('a, kinetic) term
     | Inst : ('a, kinetic) term * ('m, 'n, 'mn, ('a, kinetic) term) TubeOf.t -> ('a, kinetic) term
     (* Since the user doesn't write higher-dimensional pi-types explicitly, there is always only one variable name in a pi-type. *)
@@ -191,7 +193,9 @@ end = struct
         -> ('a, kinetic) term
     (* Abstractions and structs can appear in any kind of term. *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * (Field.t, ('a, 's) term * [ `Labeled | `Unlabeled ]) Abwd.t -> ('a, 's) term
+    | Struct :
+        's eta * (Field.checked, ('a, 's) term * [ `Labeled | `Unlabeled ]) Abwd.t
+        -> ('a, 's) term
     (* Matches can only appear in non-kinetic terms. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     (* A potential term is "realized" by kinetic terms, or canonical types, at its leaves. *)
@@ -210,7 +214,7 @@ end = struct
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields). *)
     | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
+        potential eta * 'n D.t * (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t
         -> 'a canonical
 
   (* A datatype constructor has a telescope of arguments and a list of index values depending on those arguments. *)
@@ -289,7 +293,7 @@ module rec Value : sig
     | Var : { level : level; deg : ('m, 'n) deg } -> var head
     | Const : { name : Constant.t; ins : ('a, 'b, 'c) insertion } -> const head
 
-  and 'n arg = Arg of ('n, normal) CubeOf.t | Field of Field.t
+  and 'n arg = Arg of ('n, normal) CubeOf.t | Field of Field.checked
   and app = App : 'n arg * ('m, 'n, 'k) insertion -> app
 
   and (_, _) binder =
@@ -322,7 +326,8 @@ module rec Value : sig
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     | Lam : 'k variables * ('k, 's) binder -> 's value
     | Struct :
-        (Field.t, 's evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t * ('m, 'n, 'k) insertion
+        (Field.checked, 's evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t
+        * ('m, 'n, 'k) insertion
         -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
@@ -344,7 +349,7 @@ module rec Value : sig
         eta : potential eta;
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t;
       }
         -> canonical
 
@@ -386,7 +391,7 @@ end = struct
   and 'n arg =
     | Arg of ('n, normal) CubeOf.t
     (* Fields don't store the dimension explicitly; the same field name is used at all dimensions.  But the dimension is implicitly stored in the insertion that appears on an "app". *)
-    | Field of Field.t
+    | Field of Field.checked
 
   and app = App : 'n arg * ('m, 'n, 'k) insertion -> app
 
@@ -438,7 +443,8 @@ end = struct
     | Lam : 'k variables * ('k, 's) binder -> 's value
     (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation. *)
     | Struct :
-        (Field.t, 's evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t * ('m, 'n, 'k) insertion
+        (Field.checked, 's evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t
+        * ('m, 'n, 'k) insertion
         -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
@@ -466,7 +472,7 @@ end = struct
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t;
       }
         -> canonical
 

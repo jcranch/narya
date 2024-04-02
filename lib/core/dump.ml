@@ -34,11 +34,12 @@ let rec value : type s. formatter -> s value -> unit =
   | Constr (_, _, _) -> fprintf ppf "Constr ?"
 
 and fields :
-    type s. formatter -> (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t -> unit =
+    type s.
+    formatter -> (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
   | Snoc (flds, (f, ((lazy v), l))) ->
-      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.to_string f) evaluation v
+      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.string_of_checked f) evaluation v
         (match l with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")
@@ -71,7 +72,7 @@ and app : formatter -> app -> unit =
 and arg : type n. formatter -> n arg -> unit =
  fun ppf -> function
   | Arg xs -> value ppf (CubeOf.find_top xs).tm
-  | Field fld -> fprintf ppf ".%s" (Field.to_string fld)
+  | Field fld -> fprintf ppf ".%s" (Field.string_of_checked fld)
 
 and alignment : type h. formatter -> h alignment -> unit =
  fun ppf al ->
@@ -105,7 +106,7 @@ and term : type b s. formatter -> (b, s) term -> unit =
   match tm with
   | Var _ -> fprintf ppf "Var ?"
   | Const c -> fprintf ppf "Const %a" pp_printed (print (PConstant c))
-  | Field (tm, fld) -> fprintf ppf "Field (%a, %s)" term tm (Field.to_string fld)
+  | Field (tm, fld) -> fprintf ppf "Field (%a, %s)" term tm (Field.string_of_checked fld)
   | UU n -> fprintf ppf "UU %a" dim n
   | Inst (tm, _) -> fprintf ppf "Inst (%a, ?)" term tm
   | Pi (_, _, _) -> fprintf ppf "Pi (?, ?, ?)"

@@ -3,16 +3,16 @@
 open Util
 open Core
 
-type 'n t = (string option * (string, Field.t) Abwd.t, 'n) Bwv.t
+type 'n t = (string option * (string, Field.raw) Abwd.t, 'n) Bwv.t
 
 let empty : 'n t = Emp
 let ext (ctx : 'n t) (x : string option) : 'n N.suc t = Snoc (ctx, (x, Emp))
 
-let ext_fields (ctx : 'n t) (x : string option) (flds : (string, Field.t) Abwd.t) : 'n N.suc t =
+let ext_fields (ctx : 'n t) (x : string option) (flds : (string, Field.raw) Abwd.t) : 'n N.suc t =
   Snoc (ctx, (x, flds))
 
-let rec find : type n. string -> n t -> [ `Var of n N.index | `Field of n N.index * Field.t | `None ]
-    =
+let rec find :
+    type n. string -> n t -> [ `Var of n N.index | `Field of n N.index * Field.raw | `None ] =
  fun x ctx ->
   let lift = function
     | `Var i -> `Var (N.Pop i)

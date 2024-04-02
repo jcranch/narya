@@ -622,15 +622,17 @@ and check_codata :
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (Field.checked, ((b, n) snoc, kinetic) term) Abwd.t ->
     (a, ac) codata_vars ->
-    (Field.t * ac check located) list ->
+    (Field.raw * ac check located) list ->
     (b, potential) term =
  fun status ctx eta tyargs checked_fields cube raw_fields ->
   let dim = TubeOf.inst tyargs in
   match (raw_fields, status) with
   | [], _ -> Canonical (Codata (eta, dim, checked_fields))
   | (fld, rty) :: raw_fields, Potential (name, args, hyp) -> (
+      (* TODO: When higher fields are allowed, check_zero will also return a dimension, which we have to degenerate the context by to check the field type. *)
+      let fld = Field.check_zero fld <|> Invalid_higher_method fld in
       (* Temporarily bind the current constant to the up-until-now value. *)
       Global.run_with_definition name
         (Defined (hyp (Term.Canonical (Codata (eta, dim, checked_fields)))))
@@ -672,10 +674,10 @@ and check_struct :
     (b, s) status ->
     s eta ->
     (a, b) Ctx.t ->
-    (Field.t option, a check located) Abwd.t ->
+    (Field.raw option, a check located) Abwd.t ->
     kinetic value ->
     (mn, m, n) insertion ->
-    (Field.t, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (Field.checked, ((c, n) snoc, kinetic) term) Abwd.t ->
     (b, s) term =
  fun status eta ctx tms ty ins fields ->
   let dim = cod_left_ins ins in
@@ -684,17 +686,18 @@ and check_struct :
     check_fields status eta ctx ty dim
       (* We convert the backwards alist of fields and values into a forwards list of field names only. *)
       (Bwd.fold_right (fun (fld, _) flds -> fld :: flds) fields [])
-      tms Emp Emp in
+      (Bwd.map (fun (fld, tm) -> (`Raw fld, tm)) tms)
+      Emp Emp in
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)
   Term.Struct
     ( eta,
       Bwd.map
         (function
-          | Some fld, _ -> (
+          | `Checked fld, _ -> (
               match Abwd.find_opt fld ctms with
               | Some x -> (fld, x)
               | None -> fatal (Anomaly "missing field in check"))
-          | None, _ -> fatal (Extra_field_in_tuple None))
+          | `Raw fld, _ -> fatal (Extra_field_in_tuple fld))
         tms )
 
 and check_fields :
@@ -704,12 +707,12 @@ and check_fields :
     (a, b) Ctx.t ->
     kinetic value ->
     n D.t ->
-    Field.t list ->
-    (Field.t option, a check located) Abwd.t ->
-    (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t option, a check located) Abwd.t
-    * (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    Field.checked list ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
+    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
+    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
  fun status eta ctx ty dim fields tms etms ctms ->
   let str = Value.Struct (etms, ins_zero dim) in
   match (fields, status) with
@@ -729,21 +732,21 @@ and check_field :
     (a, b) Ctx.t ->
     kinetic value ->
     n D.t ->
-    Field.t ->
-    Field.t list ->
+    Field.checked ->
+    Field.checked list ->
     kinetic value ->
-    (Field.t option, a check located) Abwd.t ->
-    (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t option, a check located) Abwd.t
-    * (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
+    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
+    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
  fun status eta ctx ty dim fld fields prev_etm tms etms ctms ->
   (* Once again we need a helper function with a declared polymorphic type in order to munge the status.  *)
   let mkstatus :
       type b s.
       (b, s) status ->
       s eta ->
-      (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+      (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
       [ `Labeled | `Unlabeled ] ->
       (b, s) status =
    fun status eta ctms lbl ->
@@ -752,8 +755,14 @@ and check_field :
     | Potential (c, args, hyp) ->
         Potential (c, args, fun tm -> hyp (Term.Struct (eta, Snoc (ctms, (fld, (tm, lbl)))))) in
   let ety = tyof_field prev_etm ty fld in
-  match Abwd.find_opt (Some fld) tms with
-  | Some tm ->
+  match
+    Abwd.find_opt_and_update_key
+      (function
+        | `Raw (Some rfld) -> Field.checks_to rfld fld
+        | _ -> false)
+      (`Checked fld) tms
+  with
+  | Some (tm, tms) ->
       let field_status = mkstatus status eta ctms `Labeled in
       let ctm = check field_status ctx tm ety in
       let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Labeled) etms in
@@ -761,7 +770,7 @@ and check_field :
       check_fields status eta ctx ty dim fields tms etms ctms
   | None -> (
       let field_status = mkstatus status eta ctms `Unlabeled in
-      match Abwd.find_opt_and_update_key None (Some fld) tms with
+      match Abwd.find_opt_and_update_key (fun x -> x = `Raw None) (`Checked fld) tms with
       | Some (tm, tms) ->
           let ctm = check field_status ctx tm ety in
           let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Unlabeled) etms in
@@ -783,7 +792,7 @@ and synth : type a b. (a, b) Ctx.t -> a synth located -> (b, kinetic) term * kin
       let stm, sty = synth ctx tm in
       (* To take a field of something, the type of the something must be a record-type that contains such a field, possibly substituted to a higher dimension and instantiated. *)
       let etm = Ctx.eval_term ctx stm in
-      let fld, newty = tyof_field_withname ~severity:Asai.Diagnostic.Error etm sty fld in
+      let fld, newty = tyof_field_raw ~severity:Asai.Diagnostic.Error etm sty fld in
       (Field (stm, fld), newty)
   | UU -> (Term.UU D.zero, universe D.zero)
   | Pi (x, dom, cod) ->

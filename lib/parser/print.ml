@@ -49,9 +49,14 @@ let pp_constr (ppf : formatter) (c : string) : unit =
   pp_utf_8 ppf c;
   pp_print_char ppf '.'
 
-let pp_field (ppf : formatter) (c : string) : unit =
+let pp_field (ppf : formatter) (c : string) (p : string list) : unit =
   pp_print_char ppf '.';
-  pp_utf_8 ppf c
+  pp_utf_8 ppf c;
+  List.iter
+    (fun p ->
+      pp_print_char ppf '.';
+      pp_utf_8 ppf p)
+    p
 
 let pp_space ppf space =
   match space with
@@ -142,8 +147,8 @@ let rec pp_term (space : space) (ppf : formatter) (wtr : observation) : unit =
       | Constr (c, w) ->
           pp_constr ppf c;
           pp_ws space ppf w
-      | Field (f, w) ->
-          pp_field ppf f;
+      | Field (f, b, w) ->
+          pp_field ppf f b;
           pp_ws space ppf w
       | Superscript (Some x, s, w) ->
           pp_term `None ppf (Term x);

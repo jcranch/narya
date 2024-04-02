@@ -85,13 +85,13 @@
 
  ￫ error[E0203]
  ￭ user-supplied term
- 1 | x .fs.t y
-   ^ invalid field name: .fs.t
+ 1 | a0 .f.s.t y
+   ^ invalid field name: f.s.t
 
- ￫ error[E0204]
+ ￫ error[E0100]
  ￭ user-supplied term
  1 | f (con.str. x)
-   ^ invalid constructor name: con.str.
+   ^ higher constructors: con.str. not yet implemented
 
  ￫ error[E0300]
  ￭ user-supplied term
@@ -181,7 +181,7 @@
  ￫ error[E0800]
  ￭ user-supplied term
  1 | s .third
-   ^ record type Σ has no field named third
+   ^ record type Σ has no field/method named third
 
  ￫ error[E1000]
  ￭ user-supplied term
@@ -216,7 +216,7 @@
  ￫ error[E0800]
  ￭ user-supplied term
  1 | gg' .ungel
-   ^ record type with a nonidentity degeneracy applied is no longer a record, hence has no field named ungel
+   ^ record type with a nonidentity degeneracy applied is no longer a record, hence has no field/method named ungel
 
  ￫ error[E0506]
  ￭ user-supplied term

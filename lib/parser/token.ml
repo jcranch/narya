@@ -4,7 +4,7 @@ open Uuseg_string
 open Printconfig
 
 type t =
-  | Field of string (* Starting with . *)
+  | Field of string * string list (* Starting with . *)
   | Constr of string (* Ending with . *)
   | LParen (* ( *)
   | RParen (* ) *)
@@ -127,7 +127,7 @@ let of_super (s : string) : string =
   of_super 0
 
 let to_string = function
-  | Field s -> "." ^ s
+  | Field (f, strs) -> String.concat "." ("" :: f :: strs)
   | Constr s -> s ^ "."
   | LParen -> "("
   | RParen -> ")"

@@ -33,7 +33,7 @@ module Code = struct
     | Invalid_variable : string list -> t
     | Invalid_numeral : string -> t
     | Invalid_constr : string -> t
-    | Invalid_field : string -> t
+    | Invalid_field : string * string list -> t
     | Invalid_degeneracy : string -> t
     | Not_enough_lambdas : int -> t
     | Not_enough_arguments_to_function : t
@@ -42,16 +42,17 @@ module Code = struct
     | Instantiating_zero_dimensional_type : printable -> t
     | Unequal_synthesized_type : printable * printable -> t
     | Checking_tuple_at_degenerated_record : printable -> t
-    | Missing_field_in_tuple : Field.t -> t
-    | Missing_method_in_comatch : Field.t -> t
-    | Extra_field_in_tuple : Field.t option -> t
-    | Extra_method_in_comatch : Field.t -> t
+    | Missing_field_in_tuple : Field.checked -> t
+    | Missing_method_in_comatch : Field.checked -> t
+    | Extra_field_in_tuple : Field.raw option -> t
+    | Extra_method_in_comatch : Field.raw -> t
     | Invalid_field_in_tuple : t
-    | Duplicate_field_in_tuple : Field.t -> t
-    | Duplicate_method_in_codata : Field.t -> t
-    | Duplicate_field_in_record : Field.t -> t
+    | Duplicate_field_in_tuple : Field.raw -> t
+    | Duplicate_method_in_codata : Field.raw -> t
+    | Invalid_higher_method : Field.raw -> t
+    | Duplicate_field_in_record : Field.raw -> t
     | Invalid_method_in_comatch : t
-    | Duplicate_method_in_comatch : Field.t -> t
+    | Duplicate_method_in_comatch : Field.raw -> t
     | Missing_constructor_in_match : Constr.t -> t
     | Unnamed_variable_in_match : t
     | Checking_lambda_at_nonfunction : printable -> t
@@ -64,8 +65,9 @@ module Code = struct
     | Wrong_number_of_arguments_to_constructor : Constr.t * int -> t
     | No_such_field :
         [ `Record of printable | `Nonrecord of printable | `Other | `Degenerated_record ]
-        * Field.or_index
+        * Field.any
         -> t
+    | Positional_higher_method : string * string list -> t
     | Missing_instantiation_constructor :
         Constr.t * [ `Constr of Constr.t | `Nonconstr of printable ]
         -> t
@@ -206,6 +208,8 @@ module Code = struct
     | Wrong_boundary_of_record _ -> Error
     | Invalid_constructor_type _ -> Error
     | Missing_constructor_type _ -> Error
+    | Positional_higher_method _ -> Error
+    | Invalid_higher_method _ -> Error
 
   (** A short, concise, ideally Google-able string representation for each message code. *)
   let short_code : t -> string = function
@@ -249,6 +253,7 @@ module Code = struct
     | Applying_nonfunction_nontype _ -> "E0701"
     (* Record fields *)
     | No_such_field _ -> "E0800"
+    | Positional_higher_method _ -> "E0801"
     (* Tuples *)
     | Checking_tuple_at_nonrecord _ -> "E0900"
     | Checking_tuple_at_degenerated_record _ -> "E0901"
@@ -292,6 +297,7 @@ module Code = struct
     | Wrong_boundary_of_record _ -> "E1505"
     | Invalid_constructor_type _ -> "E1506"
     | Missing_constructor_type _ -> "E1507"
+    | Invalid_higher_method _ -> "E1508"
     (* Commands *)
     | Too_many_commands -> "E2000"
     (* def *)
@@ -322,7 +328,7 @@ module Code = struct
     | Encoding_error -> text "UTF-8 encoding error"
     | Parsing_ambiguity str -> textf "potential parsing ambiguity: %s" str
     | Invalid_variable str -> textf "invalid local variable name: %s" (String.concat "." str)
-    | Invalid_field str -> textf "invalid field name: %s" str
+    | Invalid_field (fld, strs) -> textf "invalid field name: %s.%s" fld (String.concat "." strs)
     | Invalid_constr str -> textf "invalid constructor name: %s" str
     | Invalid_numeral str -> textf "invalid numeral: %s" str
     | Invalid_degeneracy str ->
@@ -353,21 +359,22 @@ module Code = struct
     | Comatching_at_degenerated_codata r ->
         textf "can't comatch against a codatatype %a with a nonidentity degeneracy applied"
           pp_printed (print r)
-    | Missing_field_in_tuple f -> textf "record field '%s' missing in tuple" (Field.to_string f)
+    | Missing_field_in_tuple f ->
+        textf "record field '%s' missing in tuple" (Field.string_of_checked f)
     | Missing_method_in_comatch f ->
-        textf "codata method '%s' missing in comatch" (Field.to_string f)
+        textf "codata method '%s' missing in comatch" (Field.string_of_checked f)
     | Extra_field_in_tuple f -> (
         match f with
-        | Some f -> textf "field '%s' in tuple doesn't occur in record type" (Field.to_string f)
+        | Some f -> textf "field '%s' in tuple doesn't occur in record type" (Field.string_of_raw f)
         | None -> text "too many un-labeled fields in tuple")
     | Extra_method_in_comatch f ->
-        textf "method '%s' in comatch doesn't occur in codata type" (Field.to_string f)
+        textf "method '%s' in comatch doesn't occur in codata type" (Field.string_of_raw f)
     | Invalid_field_in_tuple -> text "invalid field in tuple"
     | Invalid_method_in_comatch -> text "invalid method in comatch"
     | Duplicate_field_in_tuple f ->
-        textf "record field '%s' appears more than once in tuple" (Field.to_string f)
+        textf "record field '%s' appears more than once in tuple" (Field.string_of_raw f)
     | Duplicate_method_in_comatch f ->
-        textf "method '%s' appears more than once in comatch" (Field.to_string f)
+        textf "method '%s' appears more than once in comatch" (Field.string_of_raw f)
     | Missing_constructor_in_match c ->
         textf "missing match clause for constructor %s" (Constr.to_string c)
     | Unnamed_variable_in_match -> text "unnamed match variable"
@@ -396,16 +403,18 @@ module Code = struct
     | No_such_field (d, f) -> (
         match d with
         | `Record d ->
-            textf "record type %a has no field named %s" pp_printed (print d)
-              (Field.to_string_ori f)
+            textf "record type %a has no field/method named %s" pp_printed (print d)
+              (Field.string_of_any f)
         | `Nonrecord d ->
-            textf "non-record type %a has no field named %s" pp_printed (print d)
-              (Field.to_string_ori f)
-        | `Other -> textf "term has no field named %s" (Field.to_string_ori f)
+            textf "non-record type %a has no field/method named %s" pp_printed (print d)
+              (Field.string_of_any f)
+        | `Other -> textf "term has no field/method named %s" (Field.string_of_any f)
         | `Degenerated_record ->
             textf
-              "record type with a nonidentity degeneracy applied is no longer a record, hence has no field named %s"
-              (Field.to_string_ori f))
+              "record type with a nonidentity degeneracy applied is no longer a record, hence has no field/method named %s"
+              (Field.string_of_any f))
+    | Positional_higher_method (f, p) ->
+        textf "positional access not allowed for higher methods: %s.%s" f (String.concat "." p)
     | Missing_instantiation_constructor (exp, got) ->
         let pp_got =
           match got with
@@ -496,9 +505,9 @@ module Code = struct
         textf "checking %s at non-universe %a" tm pp_printed (print ty)
     | Canonical_type_outside_case_tree str -> textf "type %s can only occur in case trees" str
     | Duplicate_method_in_codata fld ->
-        textf "duplicate method in codatatype: %s" (Field.to_string fld)
+        textf "duplicate method in codatatype: %s" (Field.string_of_raw fld)
     | Duplicate_field_in_record fld ->
-        textf "duplicate field in record type: %s" (Field.to_string fld)
+        textf "duplicate field in record type: %s" (Field.string_of_raw fld)
     | Duplicate_constructor_in_data c ->
         textf "duplicate constructor in datatype: %s" (Constr.to_string c)
     | Wrong_boundary_of_record n ->
@@ -512,6 +521,9 @@ module Code = struct
           (Constr.to_string c)
     | Missing_constructor_type c ->
         textf "missing type for constructor %s of indexed datatype" (Constr.to_string c)
+    | Invalid_higher_method fld ->
+        textf "higher method %s must have a pure dimension without permutations"
+          (Field.string_of_raw fld)
 end
 
 include Asai.StructuredReporter.Make (Code)
