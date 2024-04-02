@@ -228,6 +228,11 @@ let rec index_in_plus : type m n mn. (m, n, mn) plus -> mn index -> (m index, n 
           | Left j -> Left j
           | Right k -> Right (Pop k)))
 
+(* List all the indices in a given context. *)
+let rec indices : type n. n t -> n index list = function
+  | Nat Zero -> []
+  | Nat (Suc n) -> Top :: List.map (fun i -> Pop i) (indices (Nat n))
+
 (* ********** Comparison ********** *)
 
 (* We can compare two natural numbers, in such a way that equality identifies their types, and inequality is witnessed by addition. *)

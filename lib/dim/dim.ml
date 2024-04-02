@@ -14,6 +14,7 @@ include Face
 include Op
 include Insertion
 module Plusmap = Plusmap
+include Pbij
 
 (* ********** Special generators ********** *)
 

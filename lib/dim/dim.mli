@@ -498,6 +498,23 @@ module Plusmap : sig
   val zerol : 'bs OfDom.t -> (D.zero, 'bs, 'bs) t
   end
 
+type (_, _, _, _) pbij
+type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
+
+val pbijs : 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij list
+
+module Pbij_strings : sig
+  type t
+
+  val empty : t
+  val is_empty : t -> bool
+  val compare : t -> t -> int
+  val of_strings : string list -> t option
+  val to_strings : t -> string list
+end
+
+val pbij_of_strings : Pbij_strings.t -> 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij option
+
 (*  *)
 val one : one D.t
 val refl : (one, D.zero) deg
