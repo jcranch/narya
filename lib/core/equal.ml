@@ -43,7 +43,7 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
   | Neu { alignment = Lawful (Codata { eta = Eta; fields; _ }); _ } ->
       (* In the eta case, we take the projections and compare them at appropriate types.  It suffices to use the fields of x when computing the types of the fields, since we proceed to check the fields for equality *in order* and thus by the time we are checking equality of any particulary field of x and y, the previous fields of x and y are already known to be equal, and the type of the current field can only depend on these.  (This is a semantic constraint on the kinds of generalized records that can sensibly admit eta-conversion.) *)
       BwdM.miterM
-        (fun [ Term.Codatafield { name = fld; _ } ] ->
+        (fun [ Value.Codatafield { name = fld; _ } ] ->
           equal_at ctx (field x fld) (field y fld) (tyof_field x ty fld))
         [ fields ]
   | Neu { alignment = Lawful (Codata { eta = Noeta; fields; _ }); _ } -> (
@@ -52,7 +52,7 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
       | Struct (xfld, xins), Struct (yfld, yins) ->
           let* () = deg_equiv (perm_of_ins xins) (perm_of_ins yins) in
           BwdM.miterM
-            (fun [ Term.Codatafield { name = fld; _ } ] ->
+            (fun [ Value.Codatafield { name = fld; _ } ] ->
               let xv =
                 match Abwd.find_opt fld xfld with
                 | Some xv -> xv

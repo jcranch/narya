@@ -281,13 +281,6 @@ module Telescope = struct
     | Ext (x, _, doms) -> Lam (singleton_variables D.zero x, lams doms body)
 end
 
-let find_codatafield (fields : ('a, 'n) codatafield Bwd.t) (fld : Field.any) :
-    ('a, 'n) codatafield option =
-  match fld with
-  | `Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> fld = name) fields
-  | `Index n -> Mbwd.fwd_nth_opt fields n
-  | `Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields
-
 (* ******************** Values ******************** *)
 
 (* A De Bruijn level is a pair of integers: one for the position (counting in) of the cube-variable-bundle in the context, and one that counts through the faces of that bundle. *)
@@ -378,6 +371,13 @@ module rec Value : sig
         indices : (('ap, kinetic) term, 'ij) Bwv.t;
       }
         -> ('m, 'ij) dataconstr
+
+  and (_, _) codatafield =
+    | Codatafield : {
+        name : Field.checked;
+        ty : (('a, 'n) snoc, kinetic) term;
+      }
+        -> ('a, 'n) codatafield
 
   and normal = { tm : kinetic value; ty : kinetic value }
 
@@ -502,6 +502,13 @@ end = struct
       }
         -> ('m, 'ij) dataconstr
 
+  and (_, _) codatafield =
+    | Codatafield : {
+        name : Field.checked;
+        ty : (('a, 'n) snoc, kinetic) term;
+      }
+        -> ('a, 'n) codatafield
+
   (* A "normal form" is a value paired with its type.  The type is used for eta-expansion and equality-checking. *)
   and normal = { tm : kinetic value; ty : kinetic value }
 
@@ -565,3 +572,10 @@ let rec args_of_apps : type n. ?degerr:Code.t -> n D.t -> app Bwd.t -> (n, norma
         | Neq -> fatal (Dimension_mismatch ("args_of_apps", CubeOf.dim arg, n))
       else fatal degerr
   | _ -> fatal (Anomaly "unexpected field projection in argument spine")
+
+let find_codatafield (fields : ('a, 'n) codatafield Bwd.t) (fld : Field.any) :
+    ('a, 'n) codatafield option =
+  match fld with
+  | `Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> fld = name) fields
+  | `Index n -> Mbwd.fwd_nth_opt fields n
+  | `Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields

@@ -622,7 +622,7 @@ and check_codata :
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (b, n) codatafield Bwd.t ->
+    (b, n) Term.codatafield Bwd.t ->
     (a, ac) codata_vars ->
     (Field.raw * ac check located) list ->
     (b, potential) term =
@@ -639,7 +639,11 @@ and check_codata :
       @@ fun () ->
       let head = Value.Const { name; ins = ins_zero dim } in
       let (Id_ins ins) = id_ins D.zero dim in
-      let alignment = Lawful (Codata { eta; env = Ctx.env ctx; ins; fields = checked_fields }) in
+      let fields =
+        Bwd.map
+          (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { name; ty })
+          checked_fields in
+      let alignment = Lawful (Codata { eta; env = Ctx.env ctx; ins; fields }) in
       let prev_ety =
         Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
       let _, domvars =

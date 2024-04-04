@@ -529,6 +529,8 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
       Data { dim = dim_env env; indices = Emp; missing = N.zero_plus i; constrs }
   | Codata (eta, n, fields) ->
       let (Id_ins ins) = id_ins (dim_env env) n in
+      let fields =
+        Bwd.map (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { name; ty }) fields in
       Codata { eta; env; ins; fields }
 
 and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =
