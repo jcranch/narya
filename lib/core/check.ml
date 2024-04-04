@@ -651,7 +651,7 @@ and check_codata :
       | Cube x ->
           let newctx = Ctx.cube_vis ctx x domvars in
           let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, Codatafield (fld, cty)) in
+          let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
           check_codata status ctx eta tyargs checked_fields cube raw_fields
       | Normal ({ value = ac; loc }, xs) -> (
           let (Faces faces) = count_faces dim in
@@ -662,7 +662,7 @@ and check_codata :
                   (vars_of_list dim (Bwv.to_list xs))
                   domvars in
               let cty = check Kinetic newctx rty (universe D.zero) in
-              let checked_fields = Snoc (checked_fields, Codatafield (fld, cty)) in
+              let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
               check_codata status ctx eta tyargs checked_fields cube raw_fields
           | Lt _ | Gt _ ->
               fatal ?loc
@@ -685,7 +685,7 @@ and check_struct :
   let tms, ctms =
     check_fields status eta ctx ty dim
       (* We convert the backwards alist of fields and values into a forwards list of field names only. *)
-      (Bwd.fold_right (fun (Codatafield (fld, _)) flds -> fld :: flds) fields [])
+      (Bwd.fold_right (fun (Codatafield { name = fld; _ }) flds -> fld :: flds) fields [])
       (Bwd.map (fun (fld, tm) -> (`Raw fld, tm)) tms)
       Emp Emp in
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)

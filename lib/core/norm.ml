@@ -452,7 +452,7 @@ and tyof_field_withname :
               } in
           let env = Value.Ext (env, entries) in
           match find_codatafield fields fld with
-          | Some (Codatafield (fldname, fldty)) ->
+          | Some (Codatafield { name = fldname; ty = fldty }) ->
               let (Val efldty) = eval env fldty in
               ( fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)

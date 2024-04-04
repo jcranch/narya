@@ -157,7 +157,8 @@ module rec Term : sig
       }
         -> ('p, 'i) dataconstr
 
-  and _ codatafield = Codatafield : Field.checked * ('b, kinetic) term -> 'b codatafield
+  and _ codatafield =
+    | Codatafield : { name : Field.checked; ty : ('b, kinetic) term } -> 'b codatafield
 
   and ('a, 'b, 'ab) tel =
     | Emp : ('a, Fwn.zero, 'a) tel
@@ -224,7 +225,8 @@ end = struct
         -> ('p, 'i) dataconstr
 
   (* TODO *)
-  and _ codatafield = Codatafield : Field.checked * ('b, kinetic) term -> 'b codatafield
+  and _ codatafield =
+    | Codatafield : { name : Field.checked; ty : ('b, kinetic) term } -> 'b codatafield
 
   (* A telescope is a list of types, each dependent on the previous ones. *)
   and ('a, 'b, 'ab) tel =
@@ -273,9 +275,9 @@ end
 
 let find_codatafield (fields : 'b codatafield Bwd.t) (fld : Field.any) : 'b codatafield option =
   match fld with
-  | `Checked fld -> Bwd.find_opt (fun (Codatafield (cfld, _)) -> fld = cfld) fields
+  | `Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> fld = name) fields
   | `Index n -> Mbwd.fwd_nth_opt fields n
-  | `Raw fld -> Bwd.find_opt (fun (Codatafield (cfld, _)) -> Field.checks_to fld cfld) fields
+  | `Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields
 
 (* ******************** Values ******************** *)
 
