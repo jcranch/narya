@@ -419,11 +419,8 @@ and tyof_field_withname :
   let (Fullinst (ty, tyargs)) = full_inst ?severity ty "tyof_field" in
   match ty with
   | Neu
-      {
-        head = Const { name = const; _ };
-        alignment = Lawful (Codata { eta = _; env; ins; fields });
-        _;
-      } -> (
+      { head = Const { name = const; _ }; alignment = Lawful (Codata { eta = _; ins; fields }); _ }
+    -> (
       (* The type cannot have a nonidentity degeneracy applied to it (though it can be at a higher dimension). *)
       if Option.is_none (is_id_ins ins) then
         fatal ?severity (No_such_field (`Degenerated_record, fld));
@@ -450,9 +447,9 @@ and tyof_field_withname :
                             CubeOf.find tyargs' (sface_plus_sface fa mn pq fb));
                       });
               } in
-          let env = Value.Ext (env, entries) in
           match find_codatafield fields fld with
-          | Some (Codatafield { name = fldname; ty = fldty }) ->
+          | Some (Codatafield { env; name = fldname; ty = fldty }) ->
+              let env = Value.Ext (env, entries) in
               let (Val efldty) = eval env fldty in
               ( fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)
@@ -530,8 +527,9 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
   | Codata (eta, n, fields) ->
       let (Id_ins ins) = id_ins (dim_env env) n in
       let fields =
-        Bwd.map (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { name; ty }) fields in
-      Codata { eta; env; ins; fields }
+        Bwd.map (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { env; name; ty }) fields
+      in
+      Codata { eta; ins; fields }
 
 and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =
  fun env tm ->

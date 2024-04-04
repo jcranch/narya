@@ -639,11 +639,12 @@ and check_codata :
       @@ fun () ->
       let head = Value.Const { name; ins = ins_zero dim } in
       let (Id_ins ins) = id_ins D.zero dim in
+      let env = Ctx.env ctx in
       let fields =
         Bwd.map
-          (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { name; ty })
+          (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { env; name; ty })
           checked_fields in
-      let alignment = Lawful (Codata { eta; env = Ctx.env ctx; ins; fields }) in
+      let alignment = Lawful (Codata { eta; ins; fields }) in
       let prev_ety =
         Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
       let _, domvars =

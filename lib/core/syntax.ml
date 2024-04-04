@@ -358,9 +358,8 @@ module rec Value : sig
         -> canonical
     | Codata : {
         eta : potential eta;
-        env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
-        fields : ('a, 'n) codatafield Bwd.t;
+        fields : ('m, 'n) codatafield Bwd.t;
       }
         -> canonical
 
@@ -374,10 +373,11 @@ module rec Value : sig
 
   and (_, _) codatafield =
     | Codatafield : {
+        env : ('m, 'a) env;
         name : Field.checked;
         ty : (('a, 'n) snoc, kinetic) term;
       }
-        -> ('a, 'n) codatafield
+        -> ('m, 'n) codatafield
 
   and normal = { tm : kinetic value; ty : kinetic value }
 
@@ -487,10 +487,9 @@ end = struct
     (* A codatatype value has an eta flag, an environment that it was evaluated at, an insertion that relates its intrinsic dimension (such as for Gel) to the dimension it was evaluated at, and its fields as unevaluted terms that depend on one additional variable belonging to the codatatype itself (usually through its previous fields).  Note that combining env, ins, and any of the field terms produces the data of a binder, so we can think of this as a family of binders,  one for each field, that share the same environment and insertion. *)
     | Codata : {
         eta : potential eta;
-        env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : ('a, 'n) codatafield Bwd.t;
+        fields : ('m, 'n) codatafield Bwd.t;
       }
         -> canonical
 
@@ -504,10 +503,11 @@ end = struct
 
   and (_, _) codatafield =
     | Codatafield : {
+        env : ('m, 'a) env;
         name : Field.checked;
         ty : (('a, 'n) snoc, kinetic) term;
       }
-        -> ('a, 'n) codatafield
+        -> ('m, 'n) codatafield
 
   (* A "normal form" is a value paired with its type.  The type is used for eta-expansion and equality-checking. *)
   and normal = { tm : kinetic value; ty : kinetic value }

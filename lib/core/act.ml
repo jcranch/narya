@@ -120,15 +120,21 @@ and act_canonical : type m n. canonical -> (m, n) deg -> canonical =
           missing;
           constrs = Constr.Map.map (fun c -> act_dataconstr c fa) constrs;
         }
-  | Codata { eta; env; ins; fields } ->
+  | Codata { eta; ins; fields } ->
       let (Of fa) = deg_plus_to s (dom_ins ins) in
-      let (Act_closure (env, ins)) = act_closure env ins fa in
-      Codata { eta; env; ins; fields }
+      let (Insfact (fc, ins)) = insfact (comp_deg (perm_of_ins ins) fa) (plus_of_ins ins) in
+      let fields = Bwd.map (fun f -> act_codatafield f fc) fields in
+      Codata { eta; ins; fields }
 
 and act_dataconstr : type m n i. (n, i) dataconstr -> (m, n) deg -> (m, i) dataconstr =
  fun (Dataconstr { env; args; indices }) s ->
   let env = Act (env, op_of_deg s) in
   Dataconstr { env; args; indices }
+
+and act_codatafield : type m n k. (n, k) codatafield -> (m, n) deg -> (m, k) codatafield =
+ fun (Codatafield { env; name; ty }) s ->
+  let env = Act (env, op_of_deg s) in
+  Codatafield { env; name; ty }
 
 and act_uninst : type m n. uninst -> (m, n) deg -> uninst =
  fun tm s ->
