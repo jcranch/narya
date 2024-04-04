@@ -148,9 +148,7 @@ module rec Term : sig
 
   and _ canonical =
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
-    | Codata :
-        potential eta * 'n D.t * (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t
-        -> 'a canonical
+    | Codata : potential eta * 'n D.t * ('a, 'n) snoc codatafield Bwd.t -> 'a canonical
 
   and (_, _) dataconstr =
     | Dataconstr : {
@@ -158,6 +156,8 @@ module rec Term : sig
         indices : (('pa, kinetic) term, 'i) Bwv.t;
       }
         -> ('p, 'i) dataconstr
+
+  and _ codatafield = Codatafield : Field.checked * ('b, kinetic) term -> 'b codatafield
 
   and ('a, 'b, 'ab) tel =
     | Emp : ('a, Fwn.zero, 'a) tel
@@ -213,9 +213,7 @@ end = struct
     (* A datatype stores its family of constructors, and also its number of indices.  (The former is not determined in the latter if there happen to be zero constructors). *)
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields). *)
-    | Codata :
-        potential eta * 'n D.t * (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t
-        -> 'a canonical
+    | Codata : potential eta * 'n D.t * ('a, 'n) snoc codatafield Bwd.t -> 'a canonical
 
   (* A datatype constructor has a telescope of arguments and a list of index values depending on those arguments. *)
   and (_, _) dataconstr =
@@ -224,6 +222,9 @@ end = struct
         indices : (('pa, kinetic) term, 'i) Bwv.t;
       }
         -> ('p, 'i) dataconstr
+
+  (* TODO *)
+  and _ codatafield = Codatafield : Field.checked * ('b, kinetic) term -> 'b codatafield
 
   (* A telescope is a list of types, each dependent on the previous ones. *)
   and ('a, 'b, 'ab) tel =
@@ -269,6 +270,12 @@ module Telescope = struct
     | Emp -> body
     | Ext (x, _, doms) -> Lam (singleton_variables D.zero x, lams doms body)
 end
+
+let find_codatafield (fields : 'b codatafield Bwd.t) (fld : Field.any) : 'b codatafield option =
+  match fld with
+  | `Checked fld -> Bwd.find_opt (fun (Codatafield (cfld, _)) -> fld = cfld) fields
+  | `Index n -> Mbwd.fwd_nth_opt fields n
+  | `Raw fld -> Bwd.find_opt (fun (Codatafield (cfld, _)) -> Field.checks_to fld cfld) fields
 
 (* ******************** Values ******************** *)
 
@@ -349,7 +356,7 @@ module rec Value : sig
         eta : potential eta;
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
-        fields : (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : ('a, 'n) snoc codatafield Bwd.t;
       }
         -> canonical
 
@@ -472,7 +479,7 @@ end = struct
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : (Field.checked, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : ('a, 'n) snoc codatafield Bwd.t;
       }
         -> canonical
 

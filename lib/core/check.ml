@@ -622,7 +622,7 @@ and check_codata :
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.checked, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (b, n) snoc codatafield Bwd.t ->
     (a, ac) codata_vars ->
     (Field.raw * ac check located) list ->
     (b, potential) term =
@@ -651,7 +651,7 @@ and check_codata :
       | Cube x ->
           let newctx = Ctx.cube_vis ctx x domvars in
           let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, (fld, cty)) in
+          let checked_fields = Snoc (checked_fields, Codatafield (fld, cty)) in
           check_codata status ctx eta tyargs checked_fields cube raw_fields
       | Normal ({ value = ac; loc }, xs) -> (
           let (Faces faces) = count_faces dim in
@@ -662,7 +662,7 @@ and check_codata :
                   (vars_of_list dim (Bwv.to_list xs))
                   domvars in
               let cty = check Kinetic newctx rty (universe D.zero) in
-              let checked_fields = Snoc (checked_fields, (fld, cty)) in
+              let checked_fields = Snoc (checked_fields, Codatafield (fld, cty)) in
               check_codata status ctx eta tyargs checked_fields cube raw_fields
           | Lt _ | Gt _ ->
               fatal ?loc
@@ -677,7 +677,7 @@ and check_struct :
     (Field.raw option, a check located) Abwd.t ->
     kinetic value ->
     (mn, m, n) insertion ->
-    (Field.checked, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (c, n) snoc codatafield Bwd.t ->
     (b, s) term =
  fun status eta ctx tms ty ins fields ->
   let dim = cod_left_ins ins in
@@ -685,7 +685,7 @@ and check_struct :
   let tms, ctms =
     check_fields status eta ctx ty dim
       (* We convert the backwards alist of fields and values into a forwards list of field names only. *)
-      (Bwd.fold_right (fun (fld, _) flds -> fld :: flds) fields [])
+      (Bwd.fold_right (fun (Codatafield (fld, _)) flds -> fld :: flds) fields [])
       (Bwd.map (fun (fld, tm) -> (`Raw fld, tm)) tms)
       Emp Emp in
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)

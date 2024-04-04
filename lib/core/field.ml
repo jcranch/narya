@@ -1,5 +1,3 @@
-open Bwd
-open Util
 open Dim
 
 module Raw = struct
@@ -50,9 +48,3 @@ let check_zero : raw -> checked option =
 (* Check that a raw field matches a checked field. *)
 let checks_to : raw -> checked -> bool =
  fun rfld cfld -> Pbij_strings.is_empty rfld.pbij && rfld.name = cfld
-
-let find (fields : (checked, 'a) Abwd.t) (fld : any) : (checked * 'a) option =
-  match fld with
-  | `Checked fld -> Bwd.find_opt (fun (cfld, _) -> fld = cfld) fields
-  | `Index n -> Mbwd.fwd_nth_opt fields n
-  | `Raw fld -> Bwd.find_opt (fun (cfld, _) -> checks_to fld cfld) fields

@@ -1,4 +1,3 @@
-open Util
 open Dim
 
 module Raw : sig
@@ -30,4 +29,3 @@ type any = [ `Raw of raw | `Checked of checked | `Index of int ]
 val string_of_any : any -> string
 val check_zero : raw -> checked option
 val checks_to : raw -> checked -> bool
-val find : (checked, 'a) Abwd.t -> any -> (checked * 'a) option
