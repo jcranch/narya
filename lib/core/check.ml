@@ -622,7 +622,7 @@ and check_codata :
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (b, n) snoc codatafield Bwd.t ->
+    (b, n) codatafield Bwd.t ->
     (a, ac) codata_vars ->
     (Field.raw * ac check located) list ->
     (b, potential) term =
@@ -677,7 +677,7 @@ and check_struct :
     (Field.raw option, a check located) Abwd.t ->
     kinetic value ->
     (mn, m, n) insertion ->
-    (c, n) snoc codatafield Bwd.t ->
+    (c, n) codatafield Bwd.t ->
     (b, s) term =
  fun status eta ctx tms ty ins fields ->
   let dim = cod_left_ins ins in
