@@ -33,14 +33,12 @@ let rec value : type s. formatter -> s value -> unit =
   | Struct (f, _) -> fprintf ppf "Struct (%a)" fields f
   | Constr (_, _, _) -> fprintf ppf "Constr ?"
 
-and fields :
-    type s.
-    formatter -> (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t -> unit =
+and fields : type s. formatter -> s Value.structfield Bwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
-  | Snoc (flds, (f, ((lazy v), l))) ->
-      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.string_of_checked f) evaluation v
-        (match l with
+  | Snoc (flds, Structfield { name; value = (lazy v); labeled }) ->
+      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.string_of_checked name) evaluation v
+        (match labeled with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")
 

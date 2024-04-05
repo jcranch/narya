@@ -53,17 +53,14 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
           let* () = deg_equiv (perm_of_ins xins) (perm_of_ins yins) in
           BwdM.miterM
             (fun [ Value.Codatafield { name = fld; _ } ] ->
-              let xv =
-                match Abwd.find_opt fld xfld with
-                | Some xv -> xv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val xtm) = Lazy.force (fst xv) in
-              let yv =
-                match Abwd.find_opt fld yfld with
-                | Some yv -> yv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val ytm) = Lazy.force (fst yv) in
-              equal_at ctx xtm ytm (tyof_field x ty fld))
+              match
+                ( Bwd.find_opt (fun (Structfield f) -> f.name = fld) xfld,
+                  Bwd.find_opt (fun (Structfield f) -> f.name = fld) yfld )
+              with
+              | Some (Structfield { value = xval; _ }), Some (Structfield { value = yval; _ }) ->
+                  let Val xtm, Val ytm = (Lazy.force xval, Lazy.force yval) in
+                  equal_at ctx xtm ytm (tyof_field x ty fld)
+              | _ -> fatal (Anomaly "missing field in equality-check"))
             [ fields ]
       | Struct _, _ | _, Struct _ -> fail
       | _ -> equal_val ctx x y)

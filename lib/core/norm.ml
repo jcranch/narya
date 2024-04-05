@@ -172,7 +172,12 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       Val (field etm fld)
   | Struct (_, fields) ->
       Val
-        (Struct (Abwd.map (fun (tm, l) -> (lazy (eval env tm), l)) fields, ins_zero (dim_env env)))
+        (Struct
+           ( Bwd.map
+               (fun (Term.Structfield { name; value; labeled }) ->
+                 Structfield { name; value = lazy (eval env value); labeled })
+               fields,
+             ins_zero (dim_env env) ))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -382,28 +387,26 @@ and field : kinetic value -> Field.checked -> kinetic value =
  fun tm fld ->
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
-  | Struct (fields, _) ->
-      let xv =
-        match Abwd.find_opt fld fields with
-        | Some xv -> xv
-        | None -> fatal (Anomaly "missing field in eval") in
-      let (Val x) = Lazy.force (fst xv) in
-      x
+  | Struct (fields, _) -> (
+      match Bwd.find_opt (fun (Structfield f) -> f.name = fld) fields with
+      | Some (Structfield f) ->
+          let (Val x) = Lazy.force f.value in
+          x
+      | None -> fatal (Anomaly "missing field in eval"))
   | Uninst (Neu { head; args; alignment }, (lazy ty)) -> (
       let newty = lazy (tyof_field tm ty fld) in
       let args = Snoc (args, App (Field fld, ins_zero D.zero)) in
       match alignment with
       | True -> Uninst (Neu { head; args; alignment = True }, newty)
       | Chaotic (Struct (fields, _)) -> (
-          let x =
-            match Abwd.find_opt fld fields with
-            | Some x -> x
-            | None -> fatal (Anomaly "missing field in eval") in
-          match Lazy.force (fst x) with
-          | Realize x -> x
-          | Val x -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
-          | Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
-          | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty))
+          match Bwd.find_opt (fun (Structfield f) -> f.name = fld) fields with
+          | Some (Structfield f) -> (
+              match Lazy.force f.value with
+              | Realize x -> x
+              | Val x -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
+              | Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
+              | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty))
+          | None -> fatal (Anomaly "missing field in eval"))
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
   | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, `Checked fld))

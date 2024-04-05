@@ -88,7 +88,11 @@ let rec act_value : type m n s. s value -> (m, n) deg -> s value =
   | Struct (fields, ins) ->
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
       Struct
-        (Abwd.map (fun (tm, l) -> (lazy (act_evaluation (Lazy.force tm) fa), l)) fields, new_ins)
+        ( Bwd.map
+            (fun (Structfield fld) ->
+              Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fa) })
+            fields,
+          new_ins )
   | Constr (name, dim, args) ->
       let (Of fa) = deg_plus_to s dim ~on:"constr" in
       Constr (name, dom_deg fa, Bwd.map (fun tm -> act_value_cube tm fa) args)
@@ -127,14 +131,10 @@ and act_canonical : type m n. canonical -> (m, n) deg -> canonical =
       Codata { eta; ins; fields }
 
 and act_dataconstr : type m n i. (n, i) dataconstr -> (m, n) deg -> (m, i) dataconstr =
- fun (Dataconstr { env; args; indices }) s ->
-  let env = Act (env, op_of_deg s) in
-  Dataconstr { env; args; indices }
+ fun (Dataconstr constr) s -> Dataconstr { constr with env = Act (constr.env, op_of_deg s) }
 
 and act_codatafield : type m n k. (n, k) codatafield -> (m, n) deg -> (m, k) codatafield =
- fun (Codatafield { env; name; ty }) s ->
-  let env = Act (env, op_of_deg s) in
-  Codatafield { env; name; ty }
+ fun (Codatafield fld) s -> Codatafield { fld with env = Act (fld.env, op_of_deg s) }
 
 and act_uninst : type m n. uninst -> (m, n) deg -> uninst =
  fun tm s ->

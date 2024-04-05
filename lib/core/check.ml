@@ -699,8 +699,8 @@ and check_struct :
       Bwd.map
         (function
           | `Checked fld, _ -> (
-              match Abwd.find_opt fld ctms with
-              | Some x -> (fld, x)
+              match Bwd.find_opt (fun (Term.Structfield f) -> f.name = fld) ctms with
+              | Some x -> x
               | None -> fatal (Anomaly "missing field in check"))
           | `Raw fld, _ -> fatal (Extra_field_in_tuple fld))
         tms )
@@ -714,10 +714,10 @@ and check_fields :
     n D.t ->
     Field.checked list ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
-    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
-    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fields tms etms ctms ->
   let str = Value.Struct (etms, ins_zero dim) in
   match (fields, status) with
@@ -741,24 +741,29 @@ and check_field :
     Field.checked list ->
     kinetic value ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
-    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
-    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fld fields prev_etm tms etms ctms ->
   (* Once again we need a helper function with a declared polymorphic type in order to munge the status.  *)
   let mkstatus :
       type b s.
       (b, s) status ->
       s eta ->
-      (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+      (b, s) Term.structfield Bwd.t ->
       [ `Labeled | `Unlabeled ] ->
       (b, s) status =
-   fun status eta ctms lbl ->
+   fun status eta ctms labeled ->
     match status with
     | Kinetic -> Kinetic
     | Potential (c, args, hyp) ->
-        Potential (c, args, fun tm -> hyp (Term.Struct (eta, Snoc (ctms, (fld, (tm, lbl)))))) in
+        Potential
+          ( c,
+            args,
+            fun value ->
+              hyp (Term.Struct (eta, Snoc (ctms, Structfield { name = fld; value; labeled }))) )
+  in
   let ety = tyof_field prev_etm ty fld in
   match
     Abwd.find_opt_and_update_key
@@ -770,16 +775,22 @@ and check_field :
   | Some (tm, tms) ->
       let field_status = mkstatus status eta ctms `Labeled in
       let ctm = check field_status ctx tm ety in
-      let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Labeled) etms in
-      let ctms = Snoc (ctms, (fld, (ctm, `Labeled))) in
+      let etms =
+        Snoc (etms, Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Labeled })
+      in
+      let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Labeled }) in
       check_fields status eta ctx ty dim fields tms etms ctms
   | None -> (
       let field_status = mkstatus status eta ctms `Unlabeled in
       match Abwd.find_opt_and_update_key (fun x -> x = `Raw None) (`Checked fld) tms with
       | Some (tm, tms) ->
           let ctm = check field_status ctx tm ety in
-          let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Unlabeled) etms in
-          let ctms = Snoc (ctms, (fld, (ctm, `Unlabeled))) in
+          let etms =
+            Snoc
+              ( etms,
+                Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Unlabeled } )
+          in
+          let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Unlabeled }) in
           check_fields status eta ctx ty dim fields tms etms ctms
       | None -> fatal (Missing_field_in_tuple fld))
 
