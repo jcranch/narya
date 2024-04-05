@@ -42,8 +42,8 @@ module Code = struct
     | Instantiating_zero_dimensional_type : printable -> t
     | Unequal_synthesized_type : printable * printable -> t
     | Checking_tuple_at_degenerated_record : printable -> t
-    | Missing_field_in_tuple : Field.checked -> t
-    | Missing_method_in_comatch : Field.checked -> t
+    | Missing_field_in_tuple : ('a, 'ax, 'by, 'b) Field.checked -> t
+    | Missing_method_in_comatch : ('a, 'ax, 'by, 'b) Field.checked -> t
     | Extra_field_in_tuple : Field.raw option -> t
     | Extra_method_in_comatch : Field.raw -> t
     | Invalid_field_in_tuple : t

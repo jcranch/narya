@@ -499,6 +499,9 @@ module Plusmap : sig
   end
 
 type (_, _, _, _) pbij
+
+val zero : ('a, 'a, D.zero, D.zero) pbij
+
 type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
 
 val pbijs : 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij list
@@ -514,6 +517,7 @@ module Pbij_strings : sig
 end
 
 val pbij_of_strings : Pbij_strings.t -> 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij option
+val strings_of_pbij : ('a, 'ax, 'by, 'b) pbij -> Pbij_strings.t
 
 (*  *)
 val one : one D.t

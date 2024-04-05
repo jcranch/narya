@@ -7,6 +7,8 @@ type (_, _, _, _) pbij =
   | Suc : ('a, 'ax, 'by, 'b) pbij * 'ax D.suc D.index -> ('a, 'ax D.suc, 'by D.suc, 'b) pbij
   | Skip : ('a, 'ax, 'by, 'b) pbij -> ('a, 'ax, 'by D.suc, 'b D.suc) pbij
 
+let zero : type a. (a, a, D.zero, D.zero) pbij = Zero
+
 let rec cozero : type b. b D.t -> (D.zero, D.zero, b, b) pbij = function
   | Nat Zero -> Zero
   | Nat (Suc b) -> Skip (cozero (Nat b))
@@ -80,3 +82,5 @@ let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by)
   match Bwv.of_list ax xs with
   | Some (xs, []) -> go xs by
   | _ -> None
+
+let strings_of_pbij : type a ax by b. (a, ax, by, b) pbij -> Pbij_strings.t = fun _ -> Sorry.e ()
