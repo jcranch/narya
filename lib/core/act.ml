@@ -254,18 +254,17 @@ and act_apps : type a b. app Bwd.t -> (a, b) deg -> any_deg * app Bwd.t =
  fun apps s ->
   match apps with
   | Emp -> (Any s, Emp)
-  | Snoc (rest, App (arg, ins)) ->
+  | Snoc (rest, App (arg, ins)) -> (
       (* To act on an application, we compose the acting degeneracy with the delayed insertion, factor the result into a new insertion to leave outside and a smaller degeneracy to push in, and push the smaller degeneracy action into the application, acting on the function/struct. *)
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
-      let new_arg =
-        match arg with
-        | Arg args ->
-            (* And, in the function case, on the arguments by factorization. *)
-            Arg (act_normal_cube args fa)
-        | Field fld -> Field fld in
-      (* Finally, we recurse and assemble the result. *)
+      (* We act recursively on the other arguments. *)
       let new_s, new_rest = act_apps rest fa in
-      (new_s, Snoc (new_rest, App (new_arg, new_ins)))
+      (* In the function case, we act on the arguments by factorization. *)
+      match arg with
+      | Arg args -> (new_s, Snoc (new_rest, App (Arg (act_normal_cube args fa), new_ins)))
+      | Field fld ->
+          let (Acted fld) = Field.act fld fa in
+          (new_s, Snoc (new_rest, App (Field fld, new_ins))))
 
 (* Act on a cube of objects *)
 and act_value_cube : type m n s. (n, s value) CubeOf.t -> (m, n) deg -> (m, s value) CubeOf.t =

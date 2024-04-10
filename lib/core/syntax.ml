@@ -325,7 +325,7 @@ module rec Value : sig
     | Arg of ('n, normal) CubeOf.t
     | Field : (D.zero, 'k, 'ky, 'y) Field.checked -> 'ky arg
 
-  and app = App : 'n arg * ('m, 'n, 'k) insertion -> app
+  and app = App : 'n arg * ('nk, 'n, 'k) insertion -> app
 
   and (_, _) binder =
     | Bind : {
@@ -367,7 +367,7 @@ module rec Value : sig
 
   and _ structfield =
     | Structfield : {
-        name : Field.checked;
+        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
         value : 's evaluation Lazy.t;
         labeled : [ `Labeled | `Unlabeled ];
       }
@@ -399,7 +399,7 @@ module rec Value : sig
   and (_, _) codatafield =
     | Codatafield : {
         env : ('m, 'a) env;
-        name : Field.checked;
+        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
         ty : (('a, 'n) snoc, kinetic) term;
       }
         -> ('m, 'n) codatafield
@@ -435,7 +435,7 @@ end = struct
     | Arg of ('n, normal) CubeOf.t
     | Field : (D.zero, 'k, 'ky, 'y) Field.checked -> 'ky arg
 
-  and app = App : 'n arg * ('m, 'n, 'k) insertion -> app
+  and app = App : 'n arg * ('nk, 'n, 'k) insertion -> app
 
   (* Lambdas and Pis both bind a variable, along with its dependencies.  These are recorded as defunctionalized closures.  Since they are produced by higher-dimensional substitutions and operator actions, the dimension of the binder can be different than the dimension of the environment that closes its body.  Accordingly, in addition to the environment and degeneracy to close its body, we store information about how to map the eventual arguments into the bound variables in the body.  *)
   and (_, _) binder =
@@ -497,7 +497,7 @@ end = struct
 
   and _ structfield =
     | Structfield : {
-        name : Field.checked;
+        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
         value : 's evaluation Lazy.t;
         labeled : [ `Labeled | `Unlabeled ];
       }
@@ -533,7 +533,7 @@ end = struct
   and (_, _) codatafield =
     | Codatafield : {
         env : ('m, 'a) env;
-        name : Field.checked;
+        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
         ty : (('a, 'n) snoc, kinetic) term;
       }
         -> ('m, 'n) codatafield
@@ -605,6 +605,6 @@ let rec args_of_apps : type n. ?degerr:Code.t -> n D.t -> app Bwd.t -> (n, norma
 let find_codatafield (fields : ('a, 'n) codatafield Bwd.t) (fld : Field.any) :
     ('a, 'n) codatafield option =
   match fld with
-  | `Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> fld = name) fields
-  | `Index n -> Mbwd.fwd_nth_opt fields n
-  | `Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields
+  | Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.equal fld name) fields
+  | Index n -> Mbwd.fwd_nth_opt fields n
+  | Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields

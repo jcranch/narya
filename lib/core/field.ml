@@ -36,6 +36,11 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
 *)
 type ('a, 'ax, 'by, 'b) checked = { name : string; pbij : ('a, 'ax, 'by, 'b) pbij }
 
+let equal :
+    type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
+    (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> bool =
+ fun _ _ -> Util.Sorry.e ()
+
 let strings_of_checked (fld : ('a, 'ax, 'by, 'b) checked) : string * string list =
   (fld.name, Pbij_strings.to_strings (strings_of_pbij fld.pbij))
 
@@ -64,3 +69,10 @@ let check_zero : raw -> check_zero =
 (* Check that a raw field matches a checked field. TODO *)
 let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> bool =
  fun rfld cfld -> Pbij_strings.is_empty rfld.pbij && rfld.name = cfld.name
+
+type (_, _, _) acted = Acted : ('x, 'ky, 'ky, 'y) checked -> ('x, 'kx, 'ky) acted
+
+let act : type m x kx ky y. (x, kx, ky, y) checked -> (m, ky) deg -> (x, kx, m) acted =
+ fun fld fa ->
+  let (Comp_pbij_deg pbij) = comp_pbij_deg fld.pbij fa in
+  Acted { fld with pbij }

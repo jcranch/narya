@@ -1,4 +1,6 @@
 open Util
+open Deg
+
 (* Partial bijections. *)
 
 (* An element of ('a, 'ax, 'by, 'b) pbij is a partial bijection from 'ax to 'by, where 'a is the subset of 'ax that is omitted, and 'b is the subset of 'by that is omitted. *)
@@ -84,3 +86,10 @@ let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by)
   | _ -> None
 
 let strings_of_pbij : type a ax by b. (a, ax, by, b) pbij -> Pbij_strings.t = fun _ -> Sorry.e ()
+
+type (_, _, _) comp_pbij_deg =
+  | Comp_pbij_deg : ('x, 'ky, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
+
+let comp_pbij_deg : type x kx ky y m. (x, kx, ky, y) pbij -> (m, ky) deg -> (x, kx, m) comp_pbij_deg
+    =
+ fun _ _ -> Sorry.e ()

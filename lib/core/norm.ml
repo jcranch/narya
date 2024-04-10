@@ -174,7 +174,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       Val
         (Struct
            ( Bwd.map
-               (fun (Term.Structfield { name; value; labeled }) ->
+               (fun (Term.Structfield { name; degen; value; labeled }) ->
                  Structfield { name; value = lazy (eval env value); labeled })
                fields,
              ins_zero (dim_env env) ))
@@ -383,12 +383,12 @@ and tyof_app :
   inst out out_args
 
 (* Compute a field of a structure, at a particular dimension. *)
-and field : kinetic value -> Field.checked -> kinetic value =
+and field : type x kx ky y. kinetic value -> (x, kx, ky, y) Field.checked -> kinetic value =
  fun tm fld ->
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
   | Struct (fields, _) -> (
-      match Bwd.find_opt (fun (Structfield f) -> f.name = fld) fields with
+      match Bwd.find_opt (fun (Structfield f) -> Field.equal f.name fld) fields with
       | Some (Structfield f) ->
           let (Val x) = Lazy.force f.value in
           x

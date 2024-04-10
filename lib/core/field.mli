@@ -21,6 +21,7 @@ val intern_ori : string -> Pbij_strings.t -> raw_or_index option
 
 type ('a, 'ax, 'by, 'b) checked
 
+val equal : ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> bool
 val strings_of_checked : ('a, 'ax, 'by, 'b) checked -> string * string list
 val string_of_checked : ('a, 'ax, 'by, 'b) checked -> string
 
@@ -33,3 +34,7 @@ type check_zero = Check_zero : ('a, 'ax, 'by, 'b) checked -> check_zero | Unchec
 
 val check_zero : raw -> check_zero
 val checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> bool
+
+type (_, _, _) acted = Acted : ('x, 'ky, 'ky, 'y) checked -> ('x, 'kx, 'ky) acted
+
+val act : ('x, 'kx, 'ky, 'y) checked -> ('m, 'ky) deg -> ('x, 'kx, 'm) acted
