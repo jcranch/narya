@@ -83,7 +83,7 @@ let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by)
             (* If both 'ax and 'by are positive, we find where the last generating dimension of 'by occurs in the list and remove it, remembering its index to supply to Suc. *)
             match Bwv.find_remove (`Int (N.to_int by)) xs with
             | Some (xs, j) -> (
-                (* Then what' left we can recurse into with a smaller expected codomain. *)
+                (* Then what's left we can recurse into with a smaller expected codomain. *)
                 match go xs (Nat by') with
                 | None -> None
                 | Some (Any s) -> Some (Any (Suc (s, j))))
@@ -98,9 +98,45 @@ let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by)
 
 let strings_of_pbij : type a ax by b. (a, ax, by, b) pbij -> Pbij_strings.t = fun _ -> Sorry.e ()
 
+(* By "residual" of a partial bijection, given an element of its 'ambient, we mean the image of that element in its 'intrinsic together with the partial bijection obtained by removing those two elements, or if that element has no image then just the partial bijection obtained by removing it from the 'ambient. *)
+
+type (_, _) pbij_residual =
+  | Residual : ('x, 'kx, 'ky, 'y) pbij * 'kx D.suc D.index -> ('kx D.suc, 'ky D.suc) pbij_residual
+  | Nonresidual : ('x, 'kx, 'ky, 'y) pbij -> ('kx, 'ky D.suc) pbij_residual
+
+let rec pbij_residual : type x kx ky y. (x, kx, ky, y) pbij -> ky D.index -> (kx, ky) pbij_residual
+    =
+ fun s k ->
+  match (k, s) with
+  | Top, Suc (s, i) -> Residual (s, i)
+  | Pop k, Suc (s, i) -> (
+      match pbij_residual s k with
+      | Residual (s, j) ->
+          let i, j = D.swap_indices i j in
+          Residual (Suc (s, j), i)
+      | Nonresidual s -> Nonresidual (Suc (s, i)))
+  | Top, Skip s -> Nonresidual s
+  | Pop k, Skip s -> (
+      match pbij_residual s k with
+      | Residual (s, j) -> Residual (Skip s, j)
+      | Nonresidual s -> Nonresidual (Skip s))
+
+let rec comp_deg_pbij : type x kx ky y n. (ky, n) deg -> (x, kx, ky, y) pbij -> (kx, n) any_pbij =
+ fun s p ->
+  match s with
+  | Zero _ -> Any (Zero (intrinsic_pbij p))
+  | Suc (s, k) -> (
+      match pbij_residual p k with
+      | Residual (q, i) ->
+          let (Any r) = comp_deg_pbij s q in
+          Any (Suc (r, i))
+      | Nonresidual q ->
+          let (Any r) = comp_deg_pbij s q in
+          Any (Skip r))
+
 type (_, _, _) comp_pbij_deg =
-  | Comp_pbij_deg : ('x, 'ky, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
+  | Comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
 
 let comp_pbij_deg : type x kx ky y m. (x, kx, ky, y) pbij -> (m, ky) deg -> (x, kx, m) comp_pbij_deg
     =
- fun _ _ -> Sorry.e ()
+ fun _p _s -> Sorry.e ()

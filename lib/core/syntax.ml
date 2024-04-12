@@ -134,7 +134,7 @@ module rec Term : sig
         string option * ('a, kinetic) term * (('a, D.zero) snoc, kinetic) term
         -> ('a, kinetic) term
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * Field.wrap_checked list * ('a, 's) structfield Bwd.t -> ('a, 's) term
+    | Struct : 's eta * Field.base list * ('a, 's) structfield Bwd.t -> ('a, 's) term
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
@@ -207,7 +207,7 @@ end = struct
         -> ('a, kinetic) term
     (* Abstractions and structs can appear in any kind of term. *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * Field.wrap_checked list * ('a, 's) structfield Bwd.t -> ('a, 's) term
+    | Struct : 's eta * Field.base list * ('a, 's) structfield Bwd.t -> ('a, 's) term
     (* Matches can only appear in non-kinetic terms. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     (* A potential term is "realized" by kinetic terms, or canonical types, at its leaves. *)
@@ -356,7 +356,7 @@ module rec Value : sig
         -> kinetic value
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     | Lam : 'k variables * ('k, 's) binder -> 's value
-    | Struct : Field.wrap_checked list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    | Struct : Field.base list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   and _ evaluation =
@@ -484,7 +484,7 @@ end = struct
     (* Lambda-abstractions are never types, so they can never be nontrivially instantiated.  Thus we may as well make them values directly. *)
     | Lam : 'k variables * ('k, 's) binder -> 's value
     (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation. *)
-    | Struct : Field.wrap_checked list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    | Struct : Field.base list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   (* This is the result of evaluating a term with a given kind of energy.  Evaluating a kinetic term just produces a (kinetic) value, whereas evaluating a potential term might be a potential value (waiting for more arguments), or else the information that the case tree has reached a leaf and the resulting kinetic value or canonical type, or else the information that the case tree is permanently stuck.  *)

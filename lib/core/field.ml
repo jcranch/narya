@@ -28,6 +28,9 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
   | Some n -> if Pbij_strings.is_empty pbij then Some (`Index n) else None
   | None -> Some (`Raw (intern str pbij))
 
+type t = string
+type base = Base : { name : t; intrinsic : 'n D.t } -> base
+
 (* 'intrinsic = intrinsic dimension of the field
    'unused = the unused part of 'intrinsic, still needing to be taken up by a substitution
    'ambient = the ambient dimension to which we've been substituted
@@ -35,7 +38,7 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
    thus 'intrinsic - 'unused = 'ambient - 'remaining are the dimensions related bijectively.
 *)
 type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
-  name : string;
+  name : t;
   pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
 }
 
@@ -43,16 +46,6 @@ let equal :
     type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
     (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> bool =
  fun _ _ -> Util.Sorry.e ()
-
-let intrinsic :
-    type unused intrinsic ambient remaining.
-    (unused, intrinsic, ambient, remaining) checked -> intrinsic D.t =
- fun fld -> intrinsic_pbij fld.pbij
-
-let ambient :
-    type unused intrinsic ambient remaining.
-    (unused, intrinsic, ambient, remaining) checked -> ambient D.t =
- fun fld -> ambient_pbij fld.pbij
 
 let strings_of_checked (fld : ('a, 'ax, 'by, 'b) checked) : string * string list =
   (fld.name, Pbij_strings.to_strings (strings_of_pbij fld.pbij))
@@ -85,10 +78,3 @@ let check_zero : raw -> check_zero =
 (* Check that a raw field matches a checked field. TODO *)
 let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> bool =
  fun rfld cfld -> Pbij_strings.is_empty rfld.pbij && rfld.name = cfld.name
-
-type (_, _, _) acted = Acted : ('x, 'ky, 'ky, 'y) checked -> ('x, 'kx, 'ky) acted
-
-let act : type m x kx ky y. (x, kx, ky, y) checked -> (m, ky) deg -> (x, kx, m) acted =
- fun fld fa ->
-  let (Comp_pbij_deg pbij) = comp_pbij_deg fld.pbij fa in
-  Acted { fld with pbij }

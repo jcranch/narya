@@ -520,9 +520,10 @@ end
 
 val pbij_of_strings : Pbij_strings.t -> 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij option
 val strings_of_pbij : ('a, 'ax, 'by, 'b) pbij -> Pbij_strings.t
+val comp_deg_pbij : ('ky, 'n) deg -> ('x, 'kx, 'ky, 'y) pbij -> ('kx, 'n) any_pbij
 
 type (_, _, _) comp_pbij_deg =
-  | Comp_pbij_deg : ('x, 'ky, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
+  | Comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
 
 val comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('m, 'ky) deg -> ('x, 'kx, 'm) comp_pbij_deg
 

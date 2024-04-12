@@ -491,9 +491,9 @@ and eval_structfields :
   match fieldnames with
   | [] -> newfields
   | Wrap fld :: fieldnames ->
-      let (Plus m_ambient) = D.plus (Field.ambient fld) in
+      let (Plus m_ambient) = D.plus (ambient_pbij fld.pbij) in
       eval_structfields_pbijs newfields env fld m_ambient
-        (pbijs (Field.intrinsic fld) (D.plus_out (dim_env env) m_ambient))
+        (pbijs (intrinsic_pbij fld.pbij) (D.plus_out (dim_env env) m_ambient))
         fieldnames fields
 
 and eval_structfields_pbijs :
