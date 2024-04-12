@@ -28,18 +28,31 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
   | Some n -> if Pbij_strings.is_empty pbij then Some (`Index n) else None
   | None -> Some (`Raw (intern str pbij))
 
-(* 'ax = intrinsic dimension of the field
-   'a = the part of 'ax remaining to be taken up by a substitution
-   'by = the dimension to which we've been substituted
-   'b = the dimension remaining of that substitution after taking up some of 'ax
-   thus 'ax - 'a = 'by - 'b are the dimensions related bijectively.
+(* 'intrinsic = intrinsic dimension of the field
+   'unused = the unused part of 'intrinsic, still needing to be taken up by a substitution
+   'ambient = the ambient dimension to which we've been substituted
+   'remaining = the dimension remaining of that substitution after taking up some of 'intrinsic
+   thus 'intrinsic - 'unused = 'ambient - 'remaining are the dimensions related bijectively.
 *)
-type ('a, 'ax, 'by, 'b) checked = { name : string; pbij : ('a, 'ax, 'by, 'b) pbij }
+type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
+  name : string;
+  pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
+}
 
 let equal :
     type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
     (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> bool =
  fun _ _ -> Util.Sorry.e ()
+
+let intrinsic :
+    type unused intrinsic ambient remaining.
+    (unused, intrinsic, ambient, remaining) checked -> intrinsic D.t =
+ fun fld -> intrinsic_pbij fld.pbij
+
+let ambient :
+    type unused intrinsic ambient remaining.
+    (unused, intrinsic, ambient, remaining) checked -> ambient D.t =
+ fun fld -> ambient_pbij fld.pbij
 
 let strings_of_checked (fld : ('a, 'ax, 'by, 'b) checked) : string * string list =
   (fld.name, Pbij_strings.to_strings (strings_of_pbij fld.pbij))
@@ -59,12 +72,15 @@ let string_of_any : any -> string = function
   | Checked fld -> string_of_checked fld
   | Index i -> string_of_int i
 
+type wrap_checked = Wrap : ('x, 'kx, 'ky, 'y) checked -> wrap_checked
+
 (* Check that a raw field can appear in a codata declaration, hence that its pbij can have by=0 (textually, that there are no numbers in it).  Currently we also require ax=0, since we don't have higher fields.  TODO. *)
 type check_zero = Check_zero : ('a, 'ax, 'by, 'b) checked -> check_zero | Uncheck
 
 let check_zero : raw -> check_zero =
  fun fld ->
-  if Pbij_strings.is_empty fld.pbij then Check_zero { name = fld.name; pbij = zero } else Uncheck
+  if Pbij_strings.is_empty fld.pbij then Check_zero { name = fld.name; pbij = zero D.zero }
+  else Uncheck
 
 (* Check that a raw field matches a checked field. TODO *)
 let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> bool =

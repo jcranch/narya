@@ -170,14 +170,8 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
   | Field (tm, fld) ->
       let (Val etm) = eval env tm in
       Val (field etm fld)
-  | Struct (_, fields) ->
-      Val
-        (Struct
-           ( Bwd.map
-               (fun (Term.Structfield { name; degen; value; labeled }) ->
-                 Structfield { name; value = lazy (eval env value); labeled })
-               fields,
-             ins_zero (dim_env env) ))
+  | Struct (_, fieldnames, fields) ->
+      Val (Struct (eval_structfields env fieldnames fields Emp, ins_zero (dim_env env)))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -417,7 +411,7 @@ and tyof_field_withname :
     kinetic value ->
     kinetic value ->
     Field.any ->
-    Field.checked * kinetic value =
+    Field.wrap_checked * kinetic value =
  fun ?severity tm ty fld ->
   let (Fullinst (ty, tyargs)) = full_inst ?severity ty "tyof_field" in
   match ty with
@@ -454,7 +448,7 @@ and tyof_field_withname :
           | Some (Codatafield { env; name = fldname; ty = fldty }) ->
               let env = Value.Ext (env, entries) in
               let (Val efldty) = eval env fldty in
-              ( fldname,
+              ( Wrap fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)
                 inst efldty
                   (TubeOf.mmap
@@ -469,13 +463,55 @@ and tyof_field_withname :
           | None -> fatal ?severity (No_such_field (`Record (PConstant const), fld))))
   | _ -> fatal ?severity (No_such_field (`Other, fld))
 
-and tyof_field ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.checked) :
+and tyof_field :
+    type x kx ky y.
+    ?severity:Asai.Diagnostic.severity ->
+    kinetic value ->
+    kinetic value ->
+    (x, kx, ky, y) Field.checked ->
     kinetic value =
-  snd (tyof_field_withname ?severity tm ty (`Checked fld))
+ fun ?severity tm ty fld -> snd (tyof_field_withname ?severity tm ty (Checked fld))
 
-and tyof_field_raw ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.raw_or_index) :
-    Field.checked * kinetic value =
-  tyof_field_withname ?severity tm ty (fld :> Field.any)
+and tyof_field_raw :
+    ?severity:Asai.Diagnostic.severity ->
+    kinetic value ->
+    kinetic value ->
+    Field.raw_or_index ->
+    Field.wrap_checked * kinetic value =
+ fun ?severity tm ty fld -> tyof_field_withname ?severity tm ty (Field.any_of_raw_ori fld)
+
+and eval_structfields :
+    type m b s.
+    ?newfields:s Value.structfield Bwd.t ->
+    (m, b) env ->
+    Field.wrap_checked list ->
+    (b, s) Term.structfield Bwd.t ->
+    s Value.structfield Bwd.t =
+ fun ?(newfields = Emp) env fieldnames fields ->
+  match fieldnames with
+  | [] -> newfields
+  | Wrap fld :: fieldnames ->
+      let (Plus m_ambient) = D.plus (Field.ambient fld) in
+      eval_structfields_pbijs newfields env fld m_ambient
+        (pbijs (Field.intrinsic fld) (D.plus_out (dim_env env) m_ambient))
+        fieldnames fields
+
+and eval_structfields_pbijs :
+    type m b s unused intrinsic ambient remaining m_ambient.
+    s Value.structfield Bwd.t ->
+    (m, b) env ->
+    (unused, intrinsic, ambient, remaining) Field.checked ->
+    (m, ambient, m_ambient) D.plus ->
+    (intrinsic, m_ambient) any_pbij list ->
+    Field.wrap_checked list ->
+    (b, s) Term.structfield Bwd.t ->
+    s Value.structfield Bwd.t =
+ fun newfields env fld m_ambient pbijs fieldnames fields -> _
+
+(* Bwd.map *)
+(*               (fun (Term.Structfield { name; degen; value; labeled }) -> *)
+(*                 Structfield { name; value = lazy (eval env value); labeled }) *)
+(*               fields *)
 
 and eval_binder :
     type m n mn b s.
@@ -530,8 +566,9 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
   | Codata (eta, n, fields) ->
       let (Id_ins ins) = id_ins (dim_env env) n in
       let fields =
-        Bwd.map (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { env; name; ty }) fields
-      in
+        Bwd.map
+          (fun (Term.Codatafield { name; plusmap; ty }) -> Value.Codatafield { env; name; ty })
+          fields in
       Codata { eta; ins; fields }
 
 and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =

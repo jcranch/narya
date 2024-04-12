@@ -500,7 +500,9 @@ module Plusmap : sig
 
 type (_, _, _, _) pbij
 
-val zero : ('a, 'a, D.zero, D.zero) pbij
+val zero : 'a D.t -> ('a, 'a, D.zero, D.zero) pbij
+val intrinsic_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'kx D.t
+val ambient_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'ky D.t
 
 type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
 

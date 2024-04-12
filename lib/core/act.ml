@@ -85,14 +85,9 @@ let rec act_value : type m n s. s value -> (m, n) deg -> s value =
   | Lam (x, body) ->
       let (Of fa) = deg_plus_to s (dim_binder body) ~on:"lambda" in
       Lam (act_variables x fa, act_binder body fa)
-  | Struct (fields, ins) ->
+  | Struct (fieldnames, fields, ins) ->
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
-      Struct
-        ( Bwd.map
-            (fun (Structfield fld) ->
-              Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fa) })
-            fields,
-          new_ins )
+      Struct (fieldnames, act_structfields fieldnames fields fa, new_ins)
   | Constr (name, dim, args) ->
       let (Of fa) = deg_plus_to s dim ~on:"constr" in
       Constr (name, dom_deg fa, Bwd.map (fun tm -> act_value_cube tm fa) args)
@@ -265,6 +260,42 @@ and act_apps : type a b. app Bwd.t -> (a, b) deg -> any_deg * app Bwd.t =
       | Field fld ->
           let (Acted fld) = Field.act fld fa in
           (new_s, Snoc (new_rest, App (Field fld, new_ins))))
+
+and act_structfields :
+    type m n s.
+    ?newfields:s structfield Bwd.t ->
+    Field.wrap_checked list ->
+    s structfield Bwd.t ->
+    (m, n) deg ->
+    s structfield Bwd.t =
+ fun ?(newfields = Emp) fieldnames fields fa ->
+  match fieldnames with
+  | [] -> newfields
+  | Wrap fld :: fieldnames ->
+      let (Of fa) = deg_plus_to ~on:"struct" fa (Field.ambient fld) in
+      act_structfields_pbijs newfields fld
+        (pbijs (Field.intrinsic fld) (dom_deg fa))
+        fieldnames fields fa
+
+and act_structfields_pbijs :
+    type new_ambient s unused intrinsic old_ambient remaining.
+    s structfield Bwd.t ->
+    (unused, intrinsic, old_ambient, remaining) Field.checked ->
+    (intrinsic, new_ambient) any_pbij list ->
+    Field.wrap_checked list ->
+    s structfield Bwd.t ->
+    (new_ambient, old_ambient) deg ->
+    s structfield Bwd.t =
+ fun newfields fld pbijs fieldnames fields fa ->
+  match pbijs with
+  | [] -> act_structfields ~newfields fieldnames fields fa
+  | p :: pbijs -> _
+
+(* TODO *)
+(* Bwd.map *)
+(*   (fun (Structfield fld) -> *)
+(*     Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fa) }) *)
+(*   fields *)
 
 (* Act on a cube of objects *)
 and act_value_cube : type m n s. (n, s value) CubeOf.t -> (m, n) deg -> (m, s value) CubeOf.t =

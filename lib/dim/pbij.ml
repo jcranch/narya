@@ -5,23 +5,33 @@ open Deg
 
 (* An element of ('a, 'ax, 'by, 'b) pbij is a partial bijection from 'ax to 'by, where 'a is the subset of 'ax that is omitted, and 'b is the subset of 'by that is omitted. *)
 type (_, _, _, _) pbij =
-  | Zero : ('a, 'a, D.zero, D.zero) pbij
+  | Zero : 'a D.t -> ('a, 'a, D.zero, D.zero) pbij
   | Suc : ('a, 'ax, 'by, 'b) pbij * 'ax D.suc D.index -> ('a, 'ax D.suc, 'by D.suc, 'b) pbij
   | Skip : ('a, 'ax, 'by, 'b) pbij -> ('a, 'ax, 'by D.suc, 'b D.suc) pbij
 
-let zero : type a. (a, a, D.zero, D.zero) pbij = Zero
+let zero : type a. a D.t -> (a, a, D.zero, D.zero) pbij = fun a -> Zero a
 
 let rec cozero : type b. b D.t -> (D.zero, D.zero, b, b) pbij = function
-  | Nat Zero -> Zero
+  | Nat Zero -> Zero D.zero
   | Nat (Suc b) -> Skip (cozero (Nat b))
 
 type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
+
+let rec intrinsic_pbij : type x kx ky y. (x, kx, ky, y) pbij -> kx D.t = function
+  | Zero a -> a
+  | Suc (p, _) -> D.suc (intrinsic_pbij p)
+  | Skip p -> intrinsic_pbij p
+
+let rec ambient_pbij : type x kx ky y. (x, kx, ky, y) pbij -> ky D.t = function
+  | Zero _ -> D.zero
+  | Suc (p, _) -> D.suc (ambient_pbij p)
+  | Skip p -> D.suc (ambient_pbij p)
 
 (* List all the partial bijections from ax to by. *)
 let rec pbijs : type ax by. ax D.t -> by D.t -> (ax, by) any_pbij list =
  fun ax by ->
   match (ax, by) with
-  | _, Nat Zero -> [ Any Zero ]
+  | _, Nat Zero -> [ Any (Zero ax) ]
   | Nat Zero, _ -> [ Any (cozero by) ]
   | Nat (Suc ax'), Nat (Suc by) ->
       let skips = pbijs ax (Nat by) in
@@ -63,7 +73,8 @@ let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by)
     (* If 'by is 0, then all the remaining generating dimensions must be degeneracies, and the partial bijection is a Zero. *)
     match by with
     | Nat Zero ->
-        if Bwv.fold_right (fun x b -> x = `Deg && b) xs true then Some (Any Zero) else None
+        if Bwv.fold_right (fun x b -> x = `Deg && b) xs true then Some (Any (Zero (Bwv.length xs)))
+        else None
     | Nat (Suc by') -> (
         (* Otherwise, if 'ax is 0, the partial bijection consists of skips, i.e. it is a cozero. *)
         match xs with
