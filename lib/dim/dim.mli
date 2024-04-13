@@ -533,6 +533,18 @@ type (_, _, _) comp_pbij_deg =
 
 val comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('m, 'ky) deg -> ('x, 'kx, 'm) comp_pbij_deg
 
+type (_, _, _, _, _) pbij_of_plus =
+  | Pbij_of_plus :
+      ('unused, 'i, 'm, 'mrem) pbij
+      * ('i, 'intrinsic, 'k, 'krem) pbij
+      * ('mrem, 'krem, 'remaining) D.plus
+      -> ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
+
+val pbij_of_plus :
+  ('m, 'k, 'mk) D.plus ->
+  ('unused, 'intrinsic, 'mk, 'remaining) pbij ->
+  ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
+
 (*  *)
 val one : one D.t
 val refl : (one, D.zero) deg

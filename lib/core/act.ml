@@ -87,7 +87,7 @@ let rec act_value : type m n s. s value -> (m, n) deg -> s value =
       Lam (act_variables x fa, act_binder body fa)
   | Struct (fieldnames, fields, ins) ->
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
-      Struct (fieldnames, act_structfields (cod_left_ins new_ins) fieldnames fields fa, new_ins)
+      Struct (fieldnames, act_structfields fieldnames fields fa, new_ins)
   | Constr (name, dim, args) ->
       let (Of fa) = deg_plus_to s dim ~on:"constr" in
       Constr (name, dom_deg fa, Bwd.map (fun tm -> act_value_cube tm fa) args)
@@ -263,46 +263,62 @@ and act_apps : type a b. app Bwd.t -> (a, b) deg -> any_deg * app Bwd.t =
           (new_s, Snoc (new_rest, App (Field { fld with pbij }, new_ins))))
 
 and act_structfields :
-    type m n k s.
-    ?newfields:s structfield Bwd.t ->
-    k D.t ->
+    type m n s.
+    ?newfields:(s, m) structfield Bwd.t ->
     Field.base list ->
-    s structfield Bwd.t ->
+    (s, n) structfield Bwd.t ->
     (m, n) deg ->
-    s structfield Bwd.t =
- fun ?(newfields = Emp) dim fieldnames fields fa ->
+    (s, m) structfield Bwd.t =
+ fun ?(newfields = Emp) fieldnames fields fa ->
   match fieldnames with
   | [] -> newfields
   | Base fld :: fieldnames ->
-      let (Of fa) = deg_plus_to ~on:"struct" fa dim in
-      act_structfields_pbijs newfields dim fld.name
+      act_structfields_pbijs newfields fld.name
         (pbijs fld.intrinsic (dom_deg fa))
         fieldnames fields fa
 
 and act_structfields_pbijs :
     type new_ambient s unused intrinsic old_ambient remaining.
-    s structfield Bwd.t ->
-    old_ambient D.t ->
+    (s, new_ambient) structfield Bwd.t ->
     Field.t ->
     (intrinsic, new_ambient) any_pbij list ->
     Field.base list ->
-    s structfield Bwd.t ->
+    (s, old_ambient) structfield Bwd.t ->
     (new_ambient, old_ambient) deg ->
-    s structfield Bwd.t =
- fun newfields dim fldname pbijs fieldnames fields fa ->
+    (s, new_ambient) structfield Bwd.t =
+ fun newfields fldname pbijs fieldnames fields fa ->
   match pbijs with
-  | [] -> act_structfields ~newfields dim fieldnames fields fa
+  | [] -> act_structfields ~newfields fieldnames fields fa
   | Any p :: pbijs -> (
       let (Comp_deg_pbij (pbij, fb)) = comp_deg_pbij fa p in
       match
-        Bwd.find_opt
-          (fun (Structfield { name; _ }) -> Field.is_equal name { name = fldname; pbij })
+        Bwd.find_map
+          (function
+            | Structfield { name; env; value; memo; labeled; _ } -> (
+                match Field.equal name { name = fldname; pbij } with
+                | Eq ->
+                    let memo = Option.map (fun e -> act_evaluation e fb) memo in
+                    let newsf =
+                      Structfield
+                        {
+                          name = { name = fldname; pbij = p };
+                          env;
+                          degen = Sorry.e ();
+                          pm = Sorry.e ();
+                          pk = Sorry.e ();
+                          mk = Sorry.e ();
+                          value;
+                          memo;
+                          labeled;
+                        } in
+                    Some
+                      (act_structfields_pbijs
+                         (Snoc (newfields, newsf))
+                         fldname pbijs fieldnames fields fa)
+                | Neq -> None))
           fields
       with
-      | Some (Structfield fld) ->
-          let newsf =
-            Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fb) } in
-          act_structfields_pbijs (Snoc (newfields, newsf)) dim fldname pbijs fieldnames fields fa
+      | Some x -> x
       | None -> fatal (Anomaly "missing field in act_structfields"))
 
 (* Act on a cube of objects *)

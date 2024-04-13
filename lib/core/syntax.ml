@@ -369,7 +369,7 @@ module rec Value : sig
         -> kinetic value
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     | Lam : 'k variables * ('k, 's) binder -> 's value
-    | Struct : Field.base list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    | Struct : Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   and _ evaluation =
@@ -378,13 +378,19 @@ module rec Value : sig
     | Unrealized : potential evaluation
     | Canonical : canonical -> potential evaluation
 
-  and _ structfield =
+  and (_, _) structfield =
     | Structfield : {
-        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
-        value : 's evaluation Lazy.t;
+        name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
+        env : ('m, 'a) env;
+        mk : ('m, 'k, 'mk) D.plus;
+        pm : ('unused, 'i, 'm, 'mrem) pbij;
+        pk : ('i, 'intrinsic, 'k, 'krem) pbij;
+        degen : ('i, 'a, 'xa) Plusmap.t;
+        value : ('xa, 's) term;
+        mutable memo : 's evaluation option;
         labeled : [ `Labeled | `Unlabeled ];
       }
-        -> 's structfield
+        -> ('s, 'mk) structfield
 
   and canonical =
     | Data : {
@@ -497,8 +503,8 @@ end = struct
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     (* Lambda-abstractions are never types, so they can never be nontrivially instantiated.  Thus we may as well make them values directly. *)
     | Lam : 'k variables * ('k, 's) binder -> 's value
-    (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation. *)
-    | Struct : Field.base list * 's structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation.  (TODO: We are defunctionalizing this.) *)
+    | Struct : Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   (* This is the result of evaluating a term with a given kind of energy.  Evaluating a kinetic term just produces a (kinetic) value, whereas evaluating a potential term might be a potential value (waiting for more arguments), or else the information that the case tree has reached a leaf and the resulting kinetic value or canonical type, or else the information that the case tree is permanently stuck.  *)
@@ -509,13 +515,20 @@ end = struct
     | Unrealized : potential evaluation
     | Canonical : canonical -> potential evaluation
 
-  and _ structfield =
+  and (_, _) structfield =
+    (* TODO: this is a "higher structfield" that's restricted to potential terms.  A "lower structfield" is the old version and can appear in both kinds of terms. *)
     | Structfield : {
-        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
-        value : 's evaluation Lazy.t;
+        name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
+        env : ('m, 'a) env;
+        mk : ('m, 'k, 'mk) D.plus;
+        pm : ('unused, 'i, 'm, 'mrem) pbij;
+        pk : ('i, 'intrinsic, 'k, 'krem) pbij;
+        degen : ('i, 'a, 'xa) Plusmap.t;
+        value : ('xa, 's) term;
+        mutable memo : 's evaluation option;
         labeled : [ `Labeled | `Unlabeled ];
       }
-        -> 's structfield
+        -> ('s, 'mk) structfield
 
   (* A canonical type value is either a datatype or a codatatype/record. *)
   and canonical =

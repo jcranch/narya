@@ -158,3 +158,26 @@ type (_, _, _) comp_pbij_deg =
 let comp_pbij_deg : type x kx ky y m. (x, kx, ky, y) pbij -> (m, ky) deg -> (x, kx, m) comp_pbij_deg
     =
  fun _p _s -> Sorry.e ()
+
+(* Split a partial bijection along a decomposition of the ambient as a sum. *)
+type (_, _, _, _, _) pbij_of_plus =
+  | Pbij_of_plus :
+      ('unused, 'i, 'm, 'mrem) pbij
+      * ('i, 'intrinsic, 'k, 'krem) pbij
+      * ('mrem, 'krem, 'remaining) D.plus
+      -> ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
+
+let rec pbij_of_plus :
+    type unused intrinsic m k mk remaining.
+    (m, k, mk) D.plus ->
+    (unused, intrinsic, mk, remaining) pbij ->
+    (unused, intrinsic, m, k, remaining) pbij_of_plus =
+ fun mk p ->
+  match (mk, p) with
+  | Zero, _ -> Pbij_of_plus (p, Zero (intrinsic_pbij p), Zero)
+  | Suc mk, Suc (p, i) ->
+      let (Pbij_of_plus (r, q, x)) = pbij_of_plus mk p in
+      Pbij_of_plus (r, Suc (q, i), x)
+  | Suc mk, Skip p ->
+      let (Pbij_of_plus (r, q, x)) = pbij_of_plus mk p in
+      Pbij_of_plus (r, Skip q, Suc x)

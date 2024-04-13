@@ -27,6 +27,11 @@ type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
   pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
 }
 
+val make_checked :
+  t ->
+  ('unused, 'intrinsic, 'ambient, 'remaining) pbij ->
+  ('unused, 'intrinsic, 'ambient, 'remaining) checked
+
 val equal :
   ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> ('x1, 'x2) Util.Monoid.compare
 

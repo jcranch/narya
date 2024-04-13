@@ -172,7 +172,11 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       Val (field etm fld)
   | Struct (_, dim, fieldnames, fields) ->
       let (Plus mk) = D.plus dim in
-      Val (Struct (fieldnames, eval_structfields env mk fieldnames fields, ins_zero (dim_env env)))
+      Val
+        (Struct
+           ( fieldnames,
+             eval_structfields env mk fieldnames fields,
+             ins_zero (D.plus_out (dim_env env) mk) ))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -383,10 +387,23 @@ and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> 
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
   | Struct (_, fields, _) -> (
-      match Bwd.find_opt (fun (Structfield f) -> Field.is_equal f.name fld) fields with
-      | Some (Structfield f) ->
-          let (Val x) = Lazy.force f.value in
-          x
+      (* TODO: Actually this case is simpler, as it must be a record type not a codatatype, and hence cannot have higher fields. *)
+      match
+        Bwd.find_map
+          (fun (Structfield f) ->
+            match Field.equal f.name fld with
+            | Eq ->
+                if Option.is_none f.memo then
+                  (* TODO: Extract a permutation and a sum from pm, now that unused=0. *)
+                  f.memo <-
+                    Some (eval (Shift (Act (f.env, Sorry.e ()), Sorry.e (), f.degen)) f.value);
+                (* TODO: I guess we need to move this function out somewhere we can give it a type signature. *)
+                let (Val x) = Option.get f.memo in
+                Some x
+            | Neq -> None)
+          fields
+      with
+      | Some x -> x
       | None -> fatal (Anomaly "missing field in eval"))
   | Uninst (Neu { head; args; alignment }, (lazy ty)) -> (
       let newty = lazy (tyof_field tm ty fld) in
@@ -396,11 +413,12 @@ and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> 
       | Chaotic (Struct (_, fields, _)) -> (
           match Bwd.find_opt (fun (Structfield f) -> Field.is_equal f.name fld) fields with
           | Some (Structfield f) -> (
-              match Lazy.force f.value with
-              | Realize x -> x
-              | Val x -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
-              | Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
-              | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty))
+              match f.memo with
+              | Some (Realize x) -> x
+              | Some (Val x) -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
+              | Some Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
+              | Some (Canonical c) -> Uninst (Neu { head; args; alignment = Lawful c }, newty)
+              | None -> Sorry.e ())
           | None -> fatal (Anomaly "missing field in eval"))
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
@@ -484,12 +502,12 @@ and tyof_field_raw :
 
 and eval_structfields :
     type m b k mk s eta.
-    ?newfields:s Value.structfield Bwd.t ->
+    ?newfields:(s, mk) Value.structfield Bwd.t ->
     (m, b) env ->
     (m, k, mk) D.plus ->
     Field.base list ->
     (b, s, eta) Term.structfield Bwd.t ->
-    s Value.structfield Bwd.t =
+    (s, mk) Value.structfield Bwd.t =
  fun ?(newfields = Emp) env mk fieldnames fields ->
   match fieldnames with
   | [] -> newfields
@@ -499,23 +517,49 @@ and eval_structfields :
         fieldnames fields
 
 and eval_structfields_pbijs :
-    type m b k s unused intrinsic ambient remaining mk eta.
-    s Value.structfield Bwd.t ->
+    type m b k s intrinsic mk eta.
+    (s, mk) Value.structfield Bwd.t ->
     (m, b) env ->
     (m, k, mk) D.plus ->
     Field.base ->
     (intrinsic, mk) any_pbij list ->
     Field.base list ->
     (b, s, eta) Term.structfield Bwd.t ->
-    s Value.structfield Bwd.t =
+    (s, mk) Value.structfield Bwd.t =
  fun newfields env mk (Base f as fld) pbijs fieldnames fields ->
   match pbijs with
   | [] -> eval_structfields ~newfields env mk fieldnames fields
-  | Any pbij :: pbijs ->
-      (* TODO: Decompose pbij according to mk, use part of it to look up in fields, and do something with the other part. *)
-      eval_structfields_pbijs
-        (Snoc (newfields, Structfield { name = { name = f.name; pbij }; value; labeled }))
-        env mk fld pbijs fieldnames fields
+  | Any p :: pbijs -> (
+      let (Pbij_of_plus (pm, pk, _)) = pbij_of_plus mk p in
+      let fldname = Field.make_checked f.name pk in
+      match
+        Bwd.find_map
+          (function
+            | Term.Structfield { name; degen; higher = _; value; labeled } -> (
+                match Field.equal fldname name with
+                | Eq ->
+                    Some
+                      (eval_structfields_pbijs
+                         (Snoc
+                            ( newfields,
+                              Structfield
+                                {
+                                  name = Field.make_checked f.name p;
+                                  env;
+                                  mk;
+                                  pm;
+                                  pk;
+                                  degen;
+                                  value;
+                                  memo = None;
+                                  labeled;
+                                } ))
+                         env mk fld pbijs fieldnames fields)
+                | Neq -> None))
+          fields
+      with
+      | Some x -> x
+      | None -> fatal (Anomaly "field not found in eval_structfields"))
 
 and eval_binder :
     type m n mn b s.

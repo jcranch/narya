@@ -36,8 +36,8 @@ let rec value : type s. formatter -> s value -> unit =
 and fields : type s. formatter -> s Value.structfield Bwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
-  | Snoc (flds, Structfield { name; value = (lazy v); labeled }) ->
-      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.string_of_checked name) evaluation v
+  | Snoc (flds, Structfield { name; labeled; _ }) ->
+      fprintf ppf "%a <: (%s, ..., %s)" fields flds (Field.string_of_checked name)
         (match labeled with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")

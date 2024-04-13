@@ -42,6 +42,13 @@ type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
   pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
 }
 
+let make_checked :
+    type unused intrinsic ambient remaining.
+    t ->
+    (unused, intrinsic, ambient, remaining) pbij ->
+    (unused, intrinsic, ambient, remaining) checked =
+ fun name pbij -> { name; pbij }
+
 let equal :
     type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
     (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> (x1, x2) Util.Monoid.compare =
