@@ -18,7 +18,12 @@ type potential = Dummy_potential
 type _ energy = Kinetic : kinetic energy | Potential : potential energy
 
 (* Structs can have or lack eta-conversion, but the only kinetic ones are the ones with eta (records). *)
-type _ eta = Eta : 's eta | Noeta : potential eta
+type yes_eta = Dummy_yes_eta
+type no_eta = Dummy_no_eta
+type (_, _) eta = Eta : ('s, yes_eta) eta | Noeta : (potential, no_eta) eta
+
+(* Only structs without eta (codatatypes) can have higher fields. *)
+type (_, _) higher = Higher : ('unused, no_eta) higher | Lower : (D.zero, yes_eta) higher
 
 (* ******************** Raw (unchecked) terms ******************** *)
 
@@ -43,14 +48,14 @@ module Raw = struct
     | Synth : 'a synth -> 'a check
     | Lam : string option located * [ `Cube | `Normal ] * 'a N.suc check located -> 'a check
     (* A "Struct" is our current name for both tuples and comatches, which share a lot of their implementation even though they are conceptually and syntactically distinct.  Those with eta=`Eta are tuples, those with eta=`Noeta are comatches.  We index them by a "Field.t option" so as to include any unlabeled fields, with their relative order to the labeled ones. *)
-    | Struct : 's eta * (Field.raw option, 'a check located) Abwd.t -> 'a check
+    | Struct : ('s, 'eta) eta * (Field.raw option, 'a check located) Abwd.t -> 'a check
     | Constr : Constr.t located * 'a check located Bwd.t -> 'a check
     | Match : 'a index * 'a branch list -> 'a check
     (* "[]", which could be either an empty match or an empty comatch *)
     | Empty_co_match : 'a check
     | Data : (Constr.t, 'a dataconstr located) Abwd.t -> 'a check
     | Codata :
-        potential eta * ('a, 'ac) codata_vars * (Field.raw, 'ac check located) Abwd.t
+        (potential, 'eta) eta * ('a, 'ac) codata_vars * (Field.raw, 'ac check located) Abwd.t
         -> 'a check
 
   and _ branch =
@@ -134,19 +139,20 @@ module rec Term : sig
         string option * ('a, kinetic) term * (('a, D.zero) snoc, kinetic) term
         -> ('a, kinetic) term
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * Field.base list * ('a, 's) structfield Bwd.t -> ('a, 's) term
+    | Struct : ('s, 'eta) eta * Field.base list * ('a, 's, 'eta) structfield Bwd.t -> ('a, 's) term
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
 
-  and (_, _) structfield =
+  and (_, _, _) structfield =
     | Structfield : {
         name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
         degen : ('unused, 'a, 'xa) Plusmap.t;
+        higher : ('intrinsic, 'eta) higher;
         value : ('xa, 's) term;
         labeled : [ `Labeled | `Unlabeled ];
       }
-        -> ('a, 's) structfield
+        -> ('a, 's, 'eta) structfield
 
   and (_, _) branch =
     | Branch :
@@ -155,7 +161,7 @@ module rec Term : sig
 
   and _ canonical =
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
-    | Codata : potential eta * 'n D.t * ('a, 'n) codatafield Bwd.t -> 'a canonical
+    | Codata : (potential, 'eta) eta * 'n D.t * ('a, 'n, 'eta) codatafield Bwd.t -> 'a canonical
 
   and (_, _) dataconstr =
     | Dataconstr : {
@@ -164,13 +170,14 @@ module rec Term : sig
       }
         -> ('p, 'i) dataconstr
 
-  and (_, _) codatafield =
+  and (_, _, _) codatafield =
     | Codatafield : {
         name : ('k, 'k, D.zero, D.zero) Field.checked;
         plusmap : ('k, ('a, 'n) snoc, 'kan) Plusmap.t;
+        higher : ('k, 'eta) higher;
         ty : ('kan, kinetic) term;
       }
-        -> ('a, 'n) codatafield
+        -> ('a, 'n, 'eta) codatafield
 
   and ('a, 'b, 'ab) tel =
     | Emp : ('a, Fwn.zero, 'a) tel
@@ -207,21 +214,22 @@ end = struct
         -> ('a, kinetic) term
     (* Abstractions and structs can appear in any kind of term. *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : 's eta * Field.base list * ('a, 's) structfield Bwd.t -> ('a, 's) term
+    | Struct : ('s, 'eta) eta * Field.base list * ('a, 's, 'eta) structfield Bwd.t -> ('a, 's) term
     (* Matches can only appear in non-kinetic terms. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     (* A potential term is "realized" by kinetic terms, or canonical types, at its leaves. *)
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
 
-  and (_, _) structfield =
+  and (_, _, _) structfield =
     | Structfield : {
         name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
         degen : ('unused, 'a, 'xa) Plusmap.t;
+        higher : ('intrinsic, 'eta) higher;
         value : ('xa, 's) term;
         labeled : [ `Labeled | `Unlabeled ];
       }
-        -> ('a, 's) structfield
+        -> ('a, 's, 'eta) structfield
 
   (* A branch of a match binds a number of new variables.  If it is a higher-dimensional match, then each of those "variables" is actually a full cube of variables.  In addition, its context must be permuted to put those new variables before the existing variables that are now defined in terms of them. *)
   and (_, _) branch =
@@ -234,7 +242,7 @@ end = struct
     (* A datatype stores its family of constructors, and also its number of indices.  (The former is not determined in the latter if there happen to be zero constructors). *)
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
     (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields). *)
-    | Codata : potential eta * 'n D.t * ('a, 'n) codatafield Bwd.t -> 'a canonical
+    | Codata : (potential, 'eta) eta * 'n D.t * ('a, 'n, 'eta) codatafield Bwd.t -> 'a canonical
 
   (* A datatype constructor has a telescope of arguments and a list of index values depending on those arguments. *)
   and (_, _) dataconstr =
@@ -245,13 +253,14 @@ end = struct
         -> ('p, 'i) dataconstr
 
   (* A codata field has an associated name, which incorporates its partial bijection.  In the declaration of a codatatype, these fields must be completely uninstantiated, i.e. just a dimension.  Its type is then checked in a context that is degenerated by that dimension. *)
-  and (_, _) codatafield =
+  and (_, _, _) codatafield =
     | Codatafield : {
         name : ('k, 'k, D.zero, D.zero) Field.checked;
         plusmap : ('k, ('a, 'n) snoc, 'kan) Plusmap.t;
+        higher : ('k, 'eta) higher;
         ty : ('kan, kinetic) term;
       }
-        -> ('a, 'n) codatafield
+        -> ('a, 'n, 'eta) codatafield
 
   (* A telescope is a list of types, each dependent on the previous ones. *)
   and ('a, 'b, 'ab) tel =
@@ -382,9 +391,9 @@ module rec Value : sig
       }
         -> canonical
     | Codata : {
-        eta : potential eta;
+        eta : (potential, 'eta) eta;
         ins : ('mn, 'm, 'n) insertion;
-        fields : ('m, 'n) codatafield Bwd.t;
+        fields : ('m, 'n, 'eta) codatafield Bwd.t;
       }
         -> canonical
 
@@ -396,13 +405,14 @@ module rec Value : sig
       }
         -> ('m, 'ij) dataconstr
 
-  and (_, _) codatafield =
+  and (_, _, _) codatafield =
     | Codatafield : {
         env : ('m, 'a) env;
-        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
+        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
+        higher : ('intrinsic, 'eta) higher;
         ty : (('a, 'n) snoc, kinetic) term;
       }
-        -> ('m, 'n) codatafield
+        -> ('m, 'n, 'eta) codatafield
 
   and normal = { tm : kinetic value; ty : kinetic value }
 
@@ -515,10 +525,10 @@ end = struct
         -> canonical
     (* A codatatype value has an eta flag, an environment that it was evaluated at, an insertion that relates its intrinsic dimension (such as for Gel) to the dimension it was evaluated at, and its fields as unevaluted terms that depend on one additional variable belonging to the codatatype itself (usually through its previous fields).  Note that combining env, ins, and any of the field terms produces the data of a binder, so we can think of this as a family of binders,  one for each field, that share the same environment and insertion. *)
     | Codata : {
-        eta : potential eta;
+        eta : (potential, 'eta) eta;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : ('m, 'n) codatafield Bwd.t;
+        fields : ('m, 'n, 'eta) codatafield Bwd.t;
       }
         -> canonical
 
@@ -530,13 +540,14 @@ end = struct
       }
         -> ('m, 'ij) dataconstr
 
-  and (_, _) codatafield =
+  and (_, _, _) codatafield =
     | Codatafield : {
         env : ('m, 'a) env;
-        name : ('x, 'kx, 'ky, 'y) Field.checked; (* TODO: Should these parameters be restricted? *)
+        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
+        higher : ('intrinsic, 'eta) higher;
         ty : (('a, 'n) snoc, kinetic) term;
       }
-        -> ('m, 'n) codatafield
+        -> ('m, 'n, 'eta) codatafield
 
   (* A "normal form" is a value paired with its type.  The type is used for eta-expansion and equality-checking. *)
   and normal = { tm : kinetic value; ty : kinetic value }
@@ -602,8 +613,8 @@ let rec args_of_apps : type n. ?degerr:Code.t -> n D.t -> app Bwd.t -> (n, norma
       else fatal degerr
   | _ -> fatal (Anomaly "unexpected field projection in argument spine")
 
-let find_codatafield (fields : ('a, 'n) codatafield Bwd.t) (fld : Field.any) :
-    ('a, 'n) codatafield option =
+let find_codatafield (fields : ('a, 'n, 'eta) codatafield Bwd.t) (fld : Field.any) :
+    ('a, 'n, 'eta) codatafield option =
   match fld with
   | Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.equal fld name) fields
   | Index n -> Mbwd.fwd_nth_opt fields n

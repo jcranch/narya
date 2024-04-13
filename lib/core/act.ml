@@ -128,7 +128,8 @@ and act_canonical : type m n. canonical -> (m, n) deg -> canonical =
 and act_dataconstr : type m n i. (n, i) dataconstr -> (m, n) deg -> (m, i) dataconstr =
  fun (Dataconstr constr) s -> Dataconstr { constr with env = Act (constr.env, op_of_deg s) }
 
-and act_codatafield : type m n k. (n, k) codatafield -> (m, n) deg -> (m, k) codatafield =
+and act_codatafield :
+    type m n k eta. (n, k, eta) codatafield -> (m, n) deg -> (m, k, eta) codatafield =
  fun (Codatafield fld) s -> Codatafield { fld with env = Act (fld.env, op_of_deg s) }
 
 and act_uninst : type m n. uninst -> (m, n) deg -> uninst =

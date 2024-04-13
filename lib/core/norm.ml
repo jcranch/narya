@@ -445,7 +445,7 @@ and tyof_field_withname :
                       });
               } in
           match find_codatafield fields fld with
-          | Some (Codatafield { env; name = fldname; ty = fldty }) ->
+          | Some (Codatafield { env; name = fldname; higher; ty = fldty }) ->
               let env = Value.Ext (env, entries) in
               let (Val efldty) = eval env fldty in
               ( Wrap fldname,
@@ -463,6 +463,11 @@ and tyof_field_withname :
           | None -> fatal ?severity (No_such_field (`Record (PConstant const), fld))))
   | _ -> fatal ?severity (No_such_field (`Other, fld))
 
+(* TODO: This case is called from:
+   - we allow x≠0 when finding the type *at which* to check a comatch field in a higher codatatype.
+   - when finding the type at which to check equality of the fields of two elements in a record type, we have x=0 because record types (with eta) don't have higher fields.  Same for reading back at a record type.
+   - when computing the type of a neutral eval'ed field projection, where x=0 is allowed if it is for the latter.  But we seem to need to allow x≠0 in "field", because it's called from tyof_field_withname and there is the first case of that above.
+*)
 and tyof_field :
     type x kx ky y.
     ?severity:Asai.Diagnostic.severity ->
@@ -472,6 +477,7 @@ and tyof_field :
     kinetic value =
  fun ?severity tm ty fld -> snd (tyof_field_withname ?severity tm ty (Checked fld))
 
+(* TODO: In this case we always want 'unused=0 in the return value, since it's only used when checking a *user's* field application. *)
 and tyof_field_raw :
     ?severity:Asai.Diagnostic.severity ->
     kinetic value ->
@@ -481,11 +487,11 @@ and tyof_field_raw :
  fun ?severity tm ty fld -> tyof_field_withname ?severity tm ty (Field.any_of_raw_ori fld)
 
 and eval_structfields :
-    type m b s.
+    type m b s eta.
     ?newfields:s Value.structfield Bwd.t ->
     (m, b) env ->
     Field.base list ->
-    (b, s) Term.structfield Bwd.t ->
+    (b, s, eta) Term.structfield Bwd.t ->
     s Value.structfield Bwd.t =
  fun ?(newfields = Emp) env fieldnames fields ->
   match fieldnames with
@@ -497,14 +503,14 @@ and eval_structfields :
         fieldnames fields
 
 and eval_structfields_pbijs :
-    type m b s unused intrinsic ambient remaining m_ambient.
+    type m b s unused intrinsic ambient remaining m_ambient eta.
     s Value.structfield Bwd.t ->
     (m, b) env ->
     (unused, intrinsic, ambient, remaining) Field.checked ->
     (m, ambient, m_ambient) D.plus ->
     (intrinsic, m_ambient) any_pbij list ->
     Field.wrap_checked list ->
-    (b, s) Term.structfield Bwd.t ->
+    (b, s, eta) Term.structfield Bwd.t ->
     s Value.structfield Bwd.t =
  fun newfields env fld m_ambient pbijs fieldnames fields -> _
 
@@ -567,7 +573,8 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
       let (Id_ins ins) = id_ins (dim_env env) n in
       let fields =
         Bwd.map
-          (fun (Term.Codatafield { name; plusmap; ty }) -> Value.Codatafield { env; name; ty })
+          (fun (Term.Codatafield { name; plusmap; higher; ty }) ->
+            Value.Codatafield { env; name; higher; ty })
           fields in
       Codata { eta; ins; fields }
 
