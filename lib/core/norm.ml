@@ -171,7 +171,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       let (Val etm) = eval env tm in
       Val (field etm fld)
   | Struct (_, fieldnames, fields) ->
-      Val (Struct (eval_structfields env fieldnames fields Emp, ins_zero (dim_env env)))
+      Val (Struct (fieldnames, eval_structfields env fieldnames fields, ins_zero (dim_env env)))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -377,11 +377,11 @@ and tyof_app :
   inst out out_args
 
 (* Compute a field of a structure, at a particular dimension. *)
-and field : type x kx ky y. kinetic value -> (x, kx, ky, y) Field.checked -> kinetic value =
+and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> kinetic value =
  fun tm fld ->
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
-  | Struct (fields, _) -> (
+  | Struct (_, fields, _) -> (
       match Bwd.find_opt (fun (Structfield f) -> Field.equal f.name fld) fields with
       | Some (Structfield f) ->
           let (Val x) = Lazy.force f.value in
@@ -392,8 +392,8 @@ and field : type x kx ky y. kinetic value -> (x, kx, ky, y) Field.checked -> kin
       let args = Snoc (args, App (Field fld, ins_zero D.zero)) in
       match alignment with
       | True -> Uninst (Neu { head; args; alignment = True }, newty)
-      | Chaotic (Struct (fields, _)) -> (
-          match Bwd.find_opt (fun (Structfield f) -> f.name = fld) fields with
+      | Chaotic (Struct (_, fields, _)) -> (
+          match Bwd.find_opt (fun (Structfield f) -> Field.equal f.name fld) fields with
           | Some (Structfield f) -> (
               match Lazy.force f.value with
               | Realize x -> x
@@ -403,7 +403,7 @@ and field : type x kx ky y. kinetic value -> (x, kx, ky, y) Field.checked -> kin
           | None -> fatal (Anomaly "missing field in eval"))
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
-  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, `Checked fld))
+  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, Checked fld))
 
 (* Given a term and its record type, compute the type of a field projection.  The caller can control the severity of errors, depending on whether we're typechecking (Error) or normalizing (Bug, the default). *)
 and tyof_field_withname :
@@ -484,13 +484,13 @@ and eval_structfields :
     type m b s.
     ?newfields:s Value.structfield Bwd.t ->
     (m, b) env ->
-    Field.wrap_checked list ->
+    Field.base list ->
     (b, s) Term.structfield Bwd.t ->
     s Value.structfield Bwd.t =
  fun ?(newfields = Emp) env fieldnames fields ->
   match fieldnames with
   | [] -> newfields
-  | Wrap fld :: fieldnames ->
+  | fld :: fieldnames ->
       let (Plus m_ambient) = D.plus (ambient_pbij fld.pbij) in
       eval_structfields_pbijs newfields env fld m_ambient
         (pbijs (intrinsic_pbij fld.pbij) (D.plus_out (dim_env env) m_ambient))

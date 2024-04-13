@@ -292,7 +292,7 @@ and act_structfields_pbijs :
   match pbijs with
   | [] -> act_structfields ~newfields dim fieldnames fields fa
   | Any p :: pbijs -> (
-      let (Any pbij) = comp_deg_pbij fa p in
+      let (Comp_deg_pbij (pbij, fb)) = comp_deg_pbij fa p in
       match
         Bwd.find_opt
           (fun (Structfield { name; _ }) -> Field.equal name { name = fldname; pbij })
@@ -300,10 +300,9 @@ and act_structfields_pbijs :
       with
       | Some (Structfield fld) ->
           let newsf =
-            (* TODO: Do we need to change the degeneracy here? *)
-            Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fa) } in
+            Structfield { fld with value = lazy (act_evaluation (Lazy.force fld.value) fb) } in
           act_structfields_pbijs (Snoc (newfields, newsf)) dim fldname pbijs fieldnames fields fa
-      | None -> fatal (Anomaly "missing field in action"))
+      | None -> fatal (Anomaly "missing field in act_structfields"))
 
 (* Act on a cube of objects *)
 and act_value_cube : type m n s. (n, s value) CubeOf.t -> (m, n) deg -> (m, s value) CubeOf.t =
