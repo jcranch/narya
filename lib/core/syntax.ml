@@ -613,9 +613,31 @@ let rec args_of_apps : type n. ?degerr:Code.t -> n D.t -> app Bwd.t -> (n, norma
       else fatal degerr
   | _ -> fatal (Anomaly "unexpected field projection in argument spine")
 
-let find_codatafield (fields : ('a, 'n, 'eta) codatafield Bwd.t) (fld : Field.any) :
-    ('a, 'n, 'eta) codatafield option =
-  match fld with
-  | Checked fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.equal fld name) fields
-  | Index n -> Mbwd.fwd_nth_opt fields n
-  | Raw fld -> Bwd.find_opt (fun (Codatafield { name; _ }) -> Field.checks_to fld name) fields
+type (_, _, _) full_codatafield =
+  | Full_codatafield : {
+      env : ('m, 'a) env;
+      name : (D.zero, 'intrinsic, 'ambient, 'remaining) Field.checked;
+      higher : ('intrinsic, 'eta) higher;
+      ty : (('a, 'n) snoc, kinetic) term;
+    }
+      -> ('m, 'n, 'eta) full_codatafield
+
+let rec find_codatafield (fields : ('a, 'n, 'eta) codatafield Bwd.t) (fld : Field.any) :
+    ('a, 'n, 'eta) full_codatafield option =
+  match (fields, fld) with
+  | Emp, _ -> None
+  | _, Index n -> (
+      match Mbwd.fwd_nth_opt fields n with
+      | None -> None
+      | Some (Codatafield { env; name; higher; ty }) -> (
+          match compare (unused_pbij name.pbij) D.zero with
+          | Eq -> Some (Full_codatafield { env; name; higher; ty })
+          | Neq -> None))
+  | Snoc (fields, Codatafield { env; name; higher; ty }), Checked cfld -> (
+      match Field.equal name cfld with
+      | Eq -> Some (Full_codatafield { env; name; higher; ty })
+      | Neq -> find_codatafield fields fld)
+  | Snoc (fields, Codatafield { env; name; higher; ty }), Raw rfld -> (
+      match Field.checks_to rfld name with
+      | Eq -> Some (Full_codatafield { env; name; higher; ty })
+      | Neq -> find_codatafield fields fld)

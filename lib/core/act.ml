@@ -296,7 +296,7 @@ and act_structfields_pbijs :
       let (Comp_deg_pbij (pbij, fb)) = comp_deg_pbij fa p in
       match
         Bwd.find_opt
-          (fun (Structfield { name; _ }) -> Field.equal name { name = fldname; pbij })
+          (fun (Structfield { name; _ }) -> Field.is_equal name { name = fldname; pbij })
           fields
       with
       | Some (Structfield fld) ->
