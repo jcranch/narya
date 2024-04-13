@@ -139,7 +139,9 @@ module rec Term : sig
         string option * ('a, kinetic) term * (('a, D.zero) snoc, kinetic) term
         -> ('a, kinetic) term
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : ('s, 'eta) eta * Field.base list * ('a, 's, 'eta) structfield Bwd.t -> ('a, 's) term
+    | Struct :
+        ('s, 'eta) eta * 'k D.t * Field.base list * ('a, 's, 'eta) structfield Bwd.t
+        -> ('a, 's) term
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
@@ -214,7 +216,9 @@ end = struct
         -> ('a, kinetic) term
     (* Abstractions and structs can appear in any kind of term. *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
-    | Struct : ('s, 'eta) eta * Field.base list * ('a, 's, 'eta) structfield Bwd.t -> ('a, 's) term
+    | Struct :
+        ('s, 'eta) eta * 'k D.t * Field.base list * ('a, 's, 'eta) structfield Bwd.t
+        -> ('a, 's) term
     (* Matches can only appear in non-kinetic terms. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     (* A potential term is "realized" by kinetic terms, or canonical types, at its leaves. *)

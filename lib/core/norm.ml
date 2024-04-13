@@ -170,8 +170,9 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
   | Field (tm, fld) ->
       let (Val etm) = eval env tm in
       Val (field etm fld)
-  | Struct (_, fieldnames, fields) ->
-      Val (Struct (fieldnames, eval_structfields env fieldnames fields, ins_zero (dim_env env)))
+  | Struct (_, dim, fieldnames, fields) ->
+      let (Plus mk) = D.plus dim in
+      Val (Struct (fieldnames, eval_structfields env mk fieldnames fields, ins_zero (dim_env env)))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -446,9 +447,9 @@ and tyof_field_withname :
               } in
           match find_codatafield fields fld with
           | Some (Full_codatafield { env; name = fldname; higher; ty = fldty }) ->
-              (* TODO: In the higher case, this environment is... *)
               let env = Value.Ext (env, entries) in
               let (Val efldty) = eval env fldty in
+              (* TODO: In the higher case, I think we need to readback this and then re-evaluate it in a different environment. *)
               ( Wrap fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)
                 inst efldty
@@ -482,37 +483,39 @@ and tyof_field_raw :
  fun ?severity tm ty fld -> tyof_field_withname ?severity tm ty (Field.any_of_raw_ori fld)
 
 and eval_structfields :
-    type m b s eta.
+    type m b k mk s eta.
     ?newfields:s Value.structfield Bwd.t ->
     (m, b) env ->
+    (m, k, mk) D.plus ->
     Field.base list ->
     (b, s, eta) Term.structfield Bwd.t ->
     s Value.structfield Bwd.t =
- fun ?(newfields = Emp) env fieldnames fields ->
+ fun ?(newfields = Emp) env mk fieldnames fields ->
   match fieldnames with
   | [] -> newfields
-  | Base fld :: fieldnames ->
-      let (Plus m_ambient) = D.plus (ambient_pbij fld.pbij) in
-      eval_structfields_pbijs newfields env fld.name m_ambient
-        (pbijs fld.intrinsic (D.plus_out (dim_env env) m_ambient))
+  | (Base f as fld) :: fieldnames ->
+      eval_structfields_pbijs newfields env mk fld
+        (pbijs f.intrinsic (D.plus_out (dim_env env) mk))
         fieldnames fields
 
 and eval_structfields_pbijs :
-    type m b s unused intrinsic ambient remaining m_ambient eta.
+    type m b k s unused intrinsic ambient remaining mk eta.
     s Value.structfield Bwd.t ->
     (m, b) env ->
-    Field.t ->
-    (m, ambient, m_ambient) D.plus ->
-    (intrinsic, m_ambient) any_pbij list ->
+    (m, k, mk) D.plus ->
+    Field.base ->
+    (intrinsic, mk) any_pbij list ->
     Field.base list ->
     (b, s, eta) Term.structfield Bwd.t ->
     s Value.structfield Bwd.t =
- fun newfields env fld m_ambient pbijs fieldnames fields -> _
-
-(* Bwd.map *)
-(*               (fun (Term.Structfield { name; degen; value; labeled }) -> *)
-(*                 Structfield { name; value = lazy (eval env value); labeled }) *)
-(*               fields *)
+ fun newfields env mk (Base f as fld) pbijs fieldnames fields ->
+  match pbijs with
+  | [] -> eval_structfields ~newfields env mk fieldnames fields
+  | Any pbij :: pbijs ->
+      (* TODO: Decompose pbij according to mk, use part of it to look up in fields, and do something with the other part. *)
+      eval_structfields_pbijs
+        (Snoc (newfields, Structfield { name = { name = f.name; pbij }; value; labeled }))
+        env mk fld pbijs fieldnames fields
 
 and eval_binder :
     type m n mn b s.
