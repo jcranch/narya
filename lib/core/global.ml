@@ -2,6 +2,7 @@
 
 open Util
 open Tbwd
+open Energy
 open Syntax
 open Term
 

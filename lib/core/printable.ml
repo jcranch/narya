@@ -1,3 +1,4 @@
+open Energy
 open Syntax
 open Term
 open Value

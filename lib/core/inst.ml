@@ -2,6 +2,7 @@ open Util
 open Tbwd
 open Reporter
 open Dim
+open Energy
 open Syntax
 open Value
 open Bwd

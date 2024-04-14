@@ -1,4 +1,5 @@
 open Dim
+open Energy
 
 module Raw = struct
   type t = { name : string; pbij : Pbij_strings.t }
@@ -29,7 +30,12 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
   | None -> Some (`Raw (intern str pbij))
 
 type t = string
-type base = Base : { name : t; intrinsic : 'n D.t } -> base
+
+let to_string x = x
+
+type _ base =
+  | Lower_base : t -> 's base
+  | Higher_base : { name : t; intrinsic : 'n D.pos } -> potential base
 
 (* 'intrinsic = intrinsic dimension of the field
    'unused = the unused part of 'intrinsic, still needing to be taken up by a substitution

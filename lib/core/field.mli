@@ -1,4 +1,5 @@
 open Dim
+open Energy
 
 module Raw : sig
   type t
@@ -20,7 +21,12 @@ val string_of_raw_ori : raw_or_index -> string
 val intern_ori : string -> Pbij_strings.t -> raw_or_index option
 
 type t
-type base = Base : { name : t; intrinsic : 'n D.t } -> base
+
+val to_string : t -> string
+
+type _ base =
+  | Lower_base : t -> 's base
+  | Higher_base : { name : t; intrinsic : 'n D.pos } -> potential base
 
 type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
   name : t;

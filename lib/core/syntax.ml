@@ -4,18 +4,9 @@ open Tbwd
 open Dim
 open Asai.Range
 open Reporter
+open Energy
 
 (* ******************** Groups of terms ******************** *)
-
-(* At both the checked and the value level we have actually two different types to define: ordinary terms and case trees.  However, there is some overlap in the types of constructors and operations that these support: they can both contain lambda-abstractions and structs.  Thus, to avoid duplication of code, we actually define both together as one GADT type family, indexed by a two-element type to distinguish them.  We name the two groups after the two kinds of energy:
-
-   - Ordinary terms are "kinetic", because ordinary computation applies directly to them.
-   - Case trees are "potential", because they don't compute until enough arguments are applied to reach a leaf of the case tree.  That leaf can be either a kinetic term or information about a canonical type (which is not a computation, just a specification of behavior).
-*)
-
-type kinetic = Dummy_kinetic
-type potential = Dummy_potential
-type _ energy = Kinetic : kinetic energy | Potential : potential energy
 
 (* Structs can have or lack eta-conversion, but the only kinetic ones are the ones with eta (records). *)
 type yes_eta = Dummy_yes_eta
@@ -140,21 +131,26 @@ module rec Term : sig
         -> ('a, kinetic) term
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
     | Struct :
-        ('s, 'eta) eta * 'k D.t * Field.base list * ('a, 's, 'eta) structfield Bwd.t
+        ('s, 'eta) eta * 'k D.t * 's Field.base list * ('a, 's, 'eta) structfield Bwd.t
         -> ('a, 's) term
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     | Realize : ('a, kinetic) term -> ('a, potential) term
     | Canonical : 'a canonical -> ('a, potential) term
 
   and (_, _, _) structfield =
-    | Structfield : {
-        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
-        degen : ('unused, 'a, 'xa) Plusmap.t;
-        higher : ('intrinsic, 'eta) higher;
-        value : ('xa, 's) term;
+    | Lower_structfield : {
+        name : Field.t;
+        value : ('a, 's) term;
         labeled : [ `Labeled | `Unlabeled ];
       }
         -> ('a, 's, 'eta) structfield
+    | Higher_structfield : {
+        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
+        intrinsic : 'intrinsic D.pos;
+        degen : ('unused, 'a, 'xa) Plusmap.t;
+        value : ('xa, potential) term;
+      }
+        -> ('a, potential, no_eta) structfield
 
   and (_, _) branch =
     | Branch :
@@ -217,7 +213,7 @@ end = struct
     (* Abstractions and structs can appear in any kind of term. *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
     | Struct :
-        ('s, 'eta) eta * 'k D.t * Field.base list * ('a, 's, 'eta) structfield Bwd.t
+        ('s, 'eta) eta * 'k D.t * 's Field.base list * ('a, 's, 'eta) structfield Bwd.t
         -> ('a, 's) term
     (* Matches can only appear in non-kinetic terms. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
@@ -226,14 +222,19 @@ end = struct
     | Canonical : 'a canonical -> ('a, potential) term
 
   and (_, _, _) structfield =
-    | Structfield : {
-        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
-        degen : ('unused, 'a, 'xa) Plusmap.t;
-        higher : ('intrinsic, 'eta) higher;
-        value : ('xa, 's) term;
+    | Lower_structfield : {
+        name : Field.t;
+        value : ('a, 's) term;
         labeled : [ `Labeled | `Unlabeled ];
       }
         -> ('a, 's, 'eta) structfield
+    | Higher_structfield : {
+        name : ('unused, 'intrinsic, 'ambient, 'remaining) Field.checked;
+        intrinsic : 'intrinsic D.pos;
+        degen : ('unused, 'a, 'xa) Plusmap.t;
+        value : ('xa, potential) term;
+      }
+        -> ('a, potential, no_eta) structfield
 
   (* A branch of a match binds a number of new variables.  If it is a higher-dimensional match, then each of those "variables" is actually a full cube of variables.  In addition, its context must be permuted to put those new variables before the existing variables that are now defined in terms of them. *)
   and (_, _) branch =
@@ -369,7 +370,7 @@ module rec Value : sig
         -> kinetic value
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     | Lam : 'k variables * ('k, 's) binder -> 's value
-    | Struct : Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    | Struct : 's Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   and _ evaluation =
@@ -379,18 +380,24 @@ module rec Value : sig
     | Canonical : canonical -> potential evaluation
 
   and (_, _) structfield =
-    | Structfield : {
+    | Lower_structfield : {
+        name : Field.t;
+        value : 's evaluation Lazy.t;
+        labeled : [ `Labeled | `Unlabeled ];
+      }
+        -> ('s, 'ambient) structfield
+    | Higher_structfield : {
+        intrinsic : 'intrinsic D.pos;
         name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
         env : ('m, 'a) env;
         mk : ('m, 'k, 'mk) D.plus;
         pm : ('unused, 'i, 'm, 'mrem) pbij;
         pk : ('i, 'intrinsic, 'k, 'krem) pbij;
         degen : ('i, 'a, 'xa) Plusmap.t;
-        value : ('xa, 's) term;
-        mutable memo : 's evaluation option;
-        labeled : [ `Labeled | `Unlabeled ];
+        value : ('xa, potential) term;
+        mutable memo : potential evaluation option;
       }
-        -> ('s, 'mk) structfield
+        -> (potential, 'mk) structfield
 
   and canonical =
     | Data : {
@@ -504,7 +511,7 @@ end = struct
     (* Lambda-abstractions are never types, so they can never be nontrivially instantiated.  Thus we may as well make them values directly. *)
     | Lam : 'k variables * ('k, 's) binder -> 's value
     (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation.  (TODO: We are defunctionalizing this.) *)
-    | Struct : Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
+    | Struct : 's Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
   (* This is the result of evaluating a term with a given kind of energy.  Evaluating a kinetic term just produces a (kinetic) value, whereas evaluating a potential term might be a potential value (waiting for more arguments), or else the information that the case tree has reached a leaf and the resulting kinetic value or canonical type, or else the information that the case tree is permanently stuck.  *)
@@ -516,19 +523,24 @@ end = struct
     | Canonical : canonical -> potential evaluation
 
   and (_, _) structfield =
-    (* TODO: this is a "higher structfield" that's restricted to potential terms.  A "lower structfield" is the old version and can appear in both kinds of terms. *)
-    | Structfield : {
+    | Lower_structfield : {
+        name : Field.t;
+        value : 's evaluation Lazy.t;
+        labeled : [ `Labeled | `Unlabeled ];
+      }
+        -> ('s, 'ambient) structfield
+    | Higher_structfield : {
+        intrinsic : 'intrinsic D.pos;
         name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
         env : ('m, 'a) env;
         mk : ('m, 'k, 'mk) D.plus;
         pm : ('unused, 'i, 'm, 'mrem) pbij;
         pk : ('i, 'intrinsic, 'k, 'krem) pbij;
         degen : ('i, 'a, 'xa) Plusmap.t;
-        value : ('xa, 's) term;
-        mutable memo : 's evaluation option;
-        labeled : [ `Labeled | `Unlabeled ];
+        value : ('xa, potential) term;
+        mutable memo : potential evaluation option;
       }
-        -> ('s, 'mk) structfield
+        -> (potential, 'mk) structfield
 
   (* A canonical type value is either a datatype or a codatatype/record. *)
   and canonical =

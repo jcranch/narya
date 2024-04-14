@@ -6,6 +6,7 @@ open Tlist
 open Tbwd
 open Dim
 open Reporter
+open Energy
 open Syntax
 open Term
 open Value

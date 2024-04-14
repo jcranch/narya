@@ -2,6 +2,7 @@ open Bwd
 open Util
 open Tbwd
 open Dim
+open Energy
 open Syntax
 open Term
 open Value

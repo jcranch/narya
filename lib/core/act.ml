@@ -2,6 +2,7 @@ open Bwd
 open Util
 open Dim
 open Reporter
+open Energy
 open Syntax
 open Value
 
@@ -265,61 +266,64 @@ and act_apps : type a b. app Bwd.t -> (a, b) deg -> any_deg * app Bwd.t =
 and act_structfields :
     type m n s.
     ?newfields:(s, m) structfield Bwd.t ->
-    Field.base list ->
+    s Field.base list ->
     (s, n) structfield Bwd.t ->
     (m, n) deg ->
     (s, m) structfield Bwd.t =
  fun ?(newfields = Emp) fieldnames fields fa ->
   match fieldnames with
   | [] -> newfields
-  | Base fld :: fieldnames ->
-      act_structfields_pbijs newfields fld.name
-        (pbijs fld.intrinsic (dom_deg fa))
+  | Lower_base fld :: fieldnames -> (
+      match Bwd.find_map (act_lower_structfield fld fa) fields with
+      | None -> fatal (Anomaly "missing field in act_structfields")
+      | Some x -> act_structfields ~newfields:(Snoc (newfields, x)) fieldnames fields fa)
+  | Higher_base { name; intrinsic } :: fieldnames ->
+      act_higher_structfield newfields name intrinsic
+        (pbijs (D.pos intrinsic) (dom_deg fa))
         fieldnames fields fa
 
-and act_structfields_pbijs :
-    type new_ambient s unused intrinsic old_ambient remaining.
-    (s, new_ambient) structfield Bwd.t ->
+and act_lower_structfield :
+    type s m n. Field.t -> (m, n) deg -> (s, n) structfield -> (s, m) structfield option =
+ fun fldname fa fld ->
+  match fld with
+  | Lower_structfield { name; value; labeled } ->
+      if name = fldname then
+        Some
+          (Lower_structfield { name; value = lazy (act_evaluation (Lazy.force value) fa); labeled })
+      else None
+  | Higher_structfield _ -> None
+
+and act_higher_structfield :
+    type new_ambient unused intrinsic old_ambient.
+    (potential, new_ambient) structfield Bwd.t ->
     Field.t ->
+    intrinsic D.pos ->
     (intrinsic, new_ambient) any_pbij list ->
-    Field.base list ->
-    (s, old_ambient) structfield Bwd.t ->
+    potential Field.base list ->
+    (potential, old_ambient) structfield Bwd.t ->
     (new_ambient, old_ambient) deg ->
-    (s, new_ambient) structfield Bwd.t =
- fun newfields fldname pbijs fieldnames fields fa ->
+    (potential, new_ambient) structfield Bwd.t =
+ fun newfields fldname intrinsic pbijs fieldnames fields fa ->
   match pbijs with
   | [] -> act_structfields ~newfields fieldnames fields fa
-  | Any p :: pbijs -> (
+  | Any p :: pbijs ->
       let (Comp_deg_pbij (pbij, fb)) = comp_deg_pbij fa p in
-      match
+      let newsf =
         Bwd.find_map
           (function
-            | Structfield { name; env; value; memo; labeled; _ } -> (
+            | Lower_structfield _ -> None
+            | Higher_structfield { name; env; value; memo; _ } -> (
                 match Field.equal name { name = fldname; pbij } with
                 | Eq ->
+                    let name = Field.make_checked fldname p in
                     let memo = Option.map (fun e -> act_evaluation e fb) memo in
-                    let newsf =
-                      Structfield
-                        {
-                          name = { name = fldname; pbij = p };
-                          env;
-                          degen = Sorry.e ();
-                          pm = Sorry.e ();
-                          pk = Sorry.e ();
-                          mk = Sorry.e ();
-                          value;
-                          memo;
-                          labeled;
-                        } in
+                    let degen, pm, pk, mk = Sorry.e () in
                     Some
-                      (act_structfields_pbijs
-                         (Snoc (newfields, newsf))
-                         fldname pbijs fieldnames fields fa)
+                      (Higher_structfield { name; env; intrinsic; degen; pm; pk; mk; value; memo })
                 | Neq -> None))
           fields
-      with
-      | Some x -> x
-      | None -> fatal (Anomaly "missing field in act_structfields"))
+        <|> Anomaly "missing field in act_structfields" in
+      act_higher_structfield (Snoc (newfields, newsf)) fldname intrinsic pbijs fieldnames fields fa
 
 (* Act on a cube of objects *)
 and act_value_cube : type m n s. (n, s value) CubeOf.t -> (m, n) deg -> (m, s value) CubeOf.t =

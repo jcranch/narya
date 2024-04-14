@@ -33,11 +33,13 @@ let rec value : type s. formatter -> s value -> unit =
   | Struct (_, f, _) -> fprintf ppf "Struct (%a)" fields f
   | Constr (_, _, _) -> fprintf ppf "Constr ?"
 
-and fields : type s. formatter -> s Value.structfield Bwd.t -> unit =
+and fields : type s ambient. formatter -> (s, ambient) Value.structfield Bwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
-  | Snoc (flds, Structfield { name; labeled; _ }) ->
-      fprintf ppf "%a <: (%s, ..., %s)" fields flds (Field.string_of_checked name)
+  | Snoc (flds, Higher_structfield { name; _ }) ->
+      fprintf ppf "%a <: (%s, ...)" fields flds (Field.string_of_checked name)
+  | Snoc (flds, Lower_structfield { name; labeled; _ }) ->
+      fprintf ppf "%a <: (%s, ..., %s)" fields flds (Field.to_string name)
         (match labeled with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")
