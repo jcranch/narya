@@ -172,12 +172,9 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       let (Val etm) = eval env tm in
       Val (field etm fld)
   | Struct (_, dim, fieldnames, fields) ->
-      let (Plus mk) = D.plus dim in
-      Val
-        (Struct
-           ( fieldnames,
-             eval_structfields env mk fieldnames fields,
-             ins_zero (D.plus_out (dim_env env) mk) ))
+      let (Id_ins mk) = id_ins (dim_env env) dim in
+      (* It's okay to use ins_zero here, even though the struct might be higher-dimensional (e.g. a Gel), because the insertion gets extended to the right as necessary when it's acted on, by insfact_comp. *)
+      Val (Struct (fieldnames, eval_structfields env mk fieldnames fields, ins_zero (dom_ins mk)))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -516,7 +513,7 @@ and eval_structfields :
     type m b k mk s eta.
     ?newfields:(s, mk) Value.structfield Bwd.t ->
     (m, b) env ->
-    (m, k, mk) D.plus ->
+    (mk, m, k) insertion ->
     s Field.base list ->
     (b, s, eta) Term.structfield Bwd.t ->
     (s, mk) Value.structfield Bwd.t =
@@ -530,7 +527,7 @@ and eval_structfields :
       eval_structfields ~newfields:(Snoc (newfields, newfld)) env mk fieldnames fields
   | Higher_base { name; intrinsic } :: fieldnames ->
       eval_higher_structfield newfields env mk name intrinsic
-        (pbijs (D.pos intrinsic) (D.plus_out (dim_env env) mk))
+        (pbijs (D.pos intrinsic) (dom_ins mk))
         fieldnames fields
 
 and eval_lower_structfield :
@@ -546,7 +543,7 @@ and eval_higher_structfield :
     type m b k intrinsic mk eta.
     (potential, mk) Value.structfield Bwd.t ->
     (m, b) env ->
-    (m, k, mk) D.plus ->
+    (mk, m, k) insertion ->
     Field.t ->
     intrinsic D.pos ->
     (intrinsic, mk) any_pbij list ->

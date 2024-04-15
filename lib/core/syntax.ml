@@ -390,7 +390,7 @@ module rec Value : sig
         intrinsic : 'intrinsic D.pos;
         name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
         env : ('m, 'a) env;
-        mk : ('m, 'k, 'mk) D.plus;
+        mk : ('mk, 'm, 'k) insertion;
         pm : ('unused, 'i, 'm, 'mrem) pbij;
         pk : ('i, 'intrinsic, 'k, 'krem) pbij;
         degen : ('i, 'a, 'xa) Plusmap.t;
@@ -533,7 +533,8 @@ end = struct
         intrinsic : 'intrinsic D.pos;
         name : ('unused, 'intrinsic, 'mk, 'remaining) Field.checked;
         env : ('m, 'a) env;
-        mk : ('m, 'k, 'mk) D.plus;
+        (* 'k is the dimension at which the struct was defined by the user, 'm is the dimension at which it was evaluated.  We need an insertion here in case degeneracies were applied outside. *)
+        mk : ('mk, 'm, 'k) insertion;
         pm : ('unused, 'i, 'm, 'mrem) pbij;
         pk : ('i, 'intrinsic, 'k, 'krem) pbij;
         degen : ('i, 'a, 'xa) Plusmap.t;
