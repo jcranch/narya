@@ -505,6 +505,10 @@ module Parse_command = struct
     let* tm = C.term [] in
     return (Command.Echo { wsecho; tm })
 
+  let undo =
+    let* wsundo = token Undo in
+    return (Command.Undo wsundo)
+
   let tightness_and_name :
       (No.wrapped option * Whitespace.t list * Scope.Trie.path * Whitespace.t list) t =
     let* tight_or_name = ident in
@@ -603,7 +607,7 @@ module Parse_command = struct
     return Command.Eof
 
   let command : unit -> Command.t C.Basic.t =
-   fun () -> bof </> axiom </> def_and </> echo </> notation </> eof
+   fun () -> bof </> axiom </> def_and </> echo </> undo </> notation </> eof
 
   let command_or_echo : unit -> Command.t C.Basic.t =
    fun () ->

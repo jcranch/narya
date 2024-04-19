@@ -32,6 +32,7 @@ type t =
     }
   | Def of def list
   | Echo of { wsecho : Whitespace.t list; tm : observation }
+  | Undo of Whitespace.t list
   | Notation : {
       fixity : ('left, 'tight, 'right) fixity;
       wsnotation : Whitespace.t list;
@@ -107,6 +108,7 @@ let execute : t -> unit = function
           Format.pp_print_newline Format.std_formatter ();
           Format.pp_print_newline Format.std_formatter ()
       | _ -> fatal (Nonsynthesizing "argument of echo"))
+  | Undo _ -> fatal (Unimplemented "undo")
   | Notation { fixity; name; pattern; head; args; _ } ->
       let notation_name = "notation" :: name in
       if Option.is_some (Scope.lookup notation_name) then
@@ -239,6 +241,11 @@ let pp_command : formatter -> t -> Whitespace.t list =
       let tm, rest = split_ending_whitespace tm in
       pp_term `None ppf (Term tm);
       pp_close_box ppf ();
+      rest
+  | Undo wsundo ->
+      pp_tok ppf Undo;
+      let ws, rest = Whitespace.split wsundo in
+      pp_ws `Nobreak ppf ws;
       rest
   | Notation
       {

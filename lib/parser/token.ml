@@ -27,6 +27,7 @@ type t =
   | Axiom
   | Def
   | And
+  | Undo
   | Echo
   | Match
   | Sig
@@ -156,6 +157,7 @@ let to_string = function
   | Def -> "def"
   | And -> "and"
   | Echo -> "echo"
+  | Undo -> "undo"
   | Match -> "match"
   | Sig -> "sig"
   | Data -> "data"
