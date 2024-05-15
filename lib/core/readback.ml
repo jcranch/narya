@@ -35,10 +35,15 @@ and readback_at : type a z. (z, a) Ctx.t -> kinetic value -> kinetic value -> (a
           Term.Lam (x, body))
   | Neu { alignment = Lawful (Codata { eta = Eta; fields = _; _ }); _ }, Struct (tmflds, tmins) ->
       let fields =
-        Abwd.mapi
-          (fun fld (fldtm, l) ->
-            match Lazy.force fldtm with
-            | Val x -> (readback_at ctx x (tyof_field tm ty fld), l))
+        Bwd.map
+          (fun (Structfield f) ->
+            let (Val x) = Lazy.force f.value in
+            Term.Structfield
+              {
+                name = f.name;
+                value = readback_at ctx x (tyof_field tm ty f.name);
+                labeled = f.labeled;
+              })
           tmflds in
       Act (Struct (Eta, fields), perm_of_ins tmins)
   | ( Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ },

@@ -30,17 +30,17 @@ let rec value : type s. formatter -> s value -> unit =
   | Inst { tm; dim = d; args = _; tys = _ } ->
       fprintf ppf "Inst (%a, %a, ?, ?)" uninst tm dim (D.pos d)
   | Lam (_, _) -> fprintf ppf "Lam ?"
-  | Struct (f, _) -> fprintf ppf "Struct (%a)" fields f
+  | Struct (_, f, _) -> fprintf ppf "Struct (%a)" fields f
   | Constr (_, _, _) -> fprintf ppf "Constr ?"
 
-and fields :
-    type s.
-    formatter -> (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t -> unit =
+and fields : type s ambient. formatter -> (s, ambient) Value.structfield Bwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
-  | Snoc (flds, (f, ((lazy v), l))) ->
-      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.string_of_checked f) evaluation v
-        (match l with
+  | Snoc (flds, Higher_structfield { name; _ }) ->
+      fprintf ppf "%a <: (%s, ...)" fields flds (Field.string_of_checked name)
+  | Snoc (flds, Lower_structfield { name; labeled; _ }) ->
+      fprintf ppf "%a <: (%s, ..., %s)" fields flds (Field.to_string name)
+        (match labeled with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")
 
@@ -115,7 +115,7 @@ and term : type b s. formatter -> (b, s) term -> unit =
   | Constr (c, _, _) -> fprintf ppf "Constr (%s, ?, ?)" (Constr.to_string c)
   | Act (tm, s) -> fprintf ppf "Act (%a, %s)" term tm (string_of_deg s)
   | Let (_, _, _) -> fprintf ppf "Let (?,?,?)"
-  | Struct (_, _) -> fprintf ppf "Struct (?,?)"
+  | Struct (_, _, _, _) -> fprintf ppf "Struct (?,?,?,?)"
   | Match (_, _, _) -> fprintf ppf "Match (?,?,?)"
   | Realize tm -> fprintf ppf "Realize %a" term tm
   | Canonical _ -> fprintf ppf "Canonical ?"

@@ -16,12 +16,6 @@ open Readback
 open Printable
 open Asai.Range
 
-let ( <|> ) : type a b. a option -> Code.t -> a =
- fun x e ->
-  match x with
-  | Some x -> x
-  | None -> fatal e
-
 (* Look through a specified number of lambdas to find an inner body.  TODO: Here 'b should really be a Fwn and the result should be a Vec, which suggests that faces should be counted in a Fwn, which would unfortunately be a massive change. *)
 let rec lambdas :
     type a b ab.
@@ -622,7 +616,7 @@ and check_codata :
     (a, b) Ctx.t ->
     potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.checked, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (b, n) Term.codatafield Bwd.t ->
     (a, ac) codata_vars ->
     (Field.raw * ac check located) list ->
     (b, potential) term =
@@ -639,7 +633,12 @@ and check_codata :
       @@ fun () ->
       let head = Value.Const { name; ins = ins_zero dim } in
       let (Id_ins ins) = id_ins D.zero dim in
-      let alignment = Lawful (Codata { eta; env = Ctx.env ctx; ins; fields = checked_fields }) in
+      let env = Ctx.env ctx in
+      let fields =
+        Bwd.map
+          (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { env; name; ty })
+          checked_fields in
+      let alignment = Lawful (Codata { eta; ins; fields }) in
       let prev_ety =
         Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
       let _, domvars =
@@ -651,7 +650,7 @@ and check_codata :
       | Cube x ->
           let newctx = Ctx.cube_vis ctx x domvars in
           let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, (fld, cty)) in
+          let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
           check_codata status ctx eta tyargs checked_fields cube raw_fields
       | Normal ({ value = ac; loc }, xs) -> (
           let (Faces faces) = count_faces dim in
@@ -662,7 +661,7 @@ and check_codata :
                   (vars_of_list dim (Bwv.to_list xs))
                   domvars in
               let cty = check Kinetic newctx rty (universe D.zero) in
-              let checked_fields = Snoc (checked_fields, (fld, cty)) in
+              let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
               check_codata status ctx eta tyargs checked_fields cube raw_fields
           | Lt _ | Gt _ ->
               fatal ?loc
@@ -677,7 +676,7 @@ and check_struct :
     (Field.raw option, a check located) Abwd.t ->
     kinetic value ->
     (mn, m, n) insertion ->
-    (Field.checked, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (c, n) codatafield Bwd.t ->
     (b, s) term =
  fun status eta ctx tms ty ins fields ->
   let dim = cod_left_ins ins in
@@ -685,7 +684,7 @@ and check_struct :
   let tms, ctms =
     check_fields status eta ctx ty dim
       (* We convert the backwards alist of fields and values into a forwards list of field names only. *)
-      (Bwd.fold_right (fun (fld, _) flds -> fld :: flds) fields [])
+      (Bwd.fold_right (fun (Codatafield { name = fld; _ }) flds -> fld :: flds) fields [])
       (Bwd.map (fun (fld, tm) -> (`Raw fld, tm)) tms)
       Emp Emp in
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)
@@ -694,8 +693,8 @@ and check_struct :
       Bwd.map
         (function
           | `Checked fld, _ -> (
-              match Abwd.find_opt fld ctms with
-              | Some x -> (fld, x)
+              match Bwd.find_opt (fun (Term.Structfield f) -> f.name = fld) ctms with
+              | Some x -> x
               | None -> fatal (Anomaly "missing field in check"))
           | `Raw fld, _ -> fatal (Extra_field_in_tuple fld))
         tms )
@@ -709,10 +708,10 @@ and check_fields :
     n D.t ->
     Field.checked list ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
-    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
-    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fields tms etms ctms ->
   let str = Value.Struct (etms, ins_zero dim) in
   match (fields, status) with
@@ -736,24 +735,29 @@ and check_field :
     Field.checked list ->
     kinetic value ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
-    (Field.checked, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
-    * (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fld fields prev_etm tms etms ctms ->
   (* Once again we need a helper function with a declared polymorphic type in order to munge the status.  *)
   let mkstatus :
       type b s.
       (b, s) status ->
       s eta ->
-      (Field.checked, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+      (b, s) Term.structfield Bwd.t ->
       [ `Labeled | `Unlabeled ] ->
       (b, s) status =
-   fun status eta ctms lbl ->
+   fun status eta ctms labeled ->
     match status with
     | Kinetic -> Kinetic
     | Potential (c, args, hyp) ->
-        Potential (c, args, fun tm -> hyp (Term.Struct (eta, Snoc (ctms, (fld, (tm, lbl)))))) in
+        Potential
+          ( c,
+            args,
+            fun value ->
+              hyp (Term.Struct (eta, Snoc (ctms, Structfield { name = fld; value; labeled }))) )
+  in
   let ety = tyof_field prev_etm ty fld in
   match
     Abwd.find_opt_and_update_key
@@ -765,16 +769,22 @@ and check_field :
   | Some (tm, tms) ->
       let field_status = mkstatus status eta ctms `Labeled in
       let ctm = check field_status ctx tm ety in
-      let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Labeled) etms in
-      let ctms = Snoc (ctms, (fld, (ctm, `Labeled))) in
+      let etms =
+        Snoc (etms, Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Labeled })
+      in
+      let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Labeled }) in
       check_fields status eta ctx ty dim fields tms etms ctms
   | None -> (
       let field_status = mkstatus status eta ctms `Unlabeled in
       match Abwd.find_opt_and_update_key (fun x -> x = `Raw None) (`Checked fld) tms with
       | Some (tm, tms) ->
           let ctm = check field_status ctx tm ety in
-          let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Unlabeled) etms in
-          let ctms = Snoc (ctms, (fld, (ctm, `Unlabeled))) in
+          let etms =
+            Snoc
+              ( etms,
+                Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Unlabeled } )
+          in
+          let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Unlabeled }) in
           check_fields status eta ctx ty dim fields tms etms ctms
       | None -> fatal (Missing_field_in_tuple fld))
 

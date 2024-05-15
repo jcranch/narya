@@ -42,30 +42,11 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
   (* In the case of a codatatype/record, the insertion ought to match whatever there is on the structs, in the case when it's possible, so we don't bother giving it a name or checking it.  And its dimension gets checked by tyof_field.  In fact because we pass off to 'field' and 'tyof_field', we don't need to make explicit use of any of the data here except whether it has eta and what the list of field names is. *)
   | Neu { alignment = Lawful (Codata { eta = Eta; fields; _ }); _ } ->
       (* In the eta case, we take the projections and compare them at appropriate types.  It suffices to use the fields of x when computing the types of the fields, since we proceed to check the fields for equality *in order* and thus by the time we are checking equality of any particulary field of x and y, the previous fields of x and y are already known to be equal, and the type of the current field can only depend on these.  (This is a semantic constraint on the kinds of generalized records that can sensibly admit eta-conversion.) *)
+      (* At a codatatype without eta, there are no kinetic structs, only comatches, and those are not compared componentwise, only as neutrals, since they are generative. *)
       BwdM.miterM
-        (fun [ (fld, _) ] -> equal_at ctx (field x fld) (field y fld) (tyof_field x ty fld))
+        (fun [ Value.Codatafield { name = fld; _ } ] ->
+          equal_at ctx (field x fld) (field y fld) (tyof_field x ty fld))
         [ fields ]
-  | Neu { alignment = Lawful (Codata { eta = Noeta; fields; _ }); _ } -> (
-      (* At a record-type without eta, two structs are equal if their insertions and corresponding fields are equal, and a struct is not equal to any other term.  We have to handle these cases here, though, because once we get to equal_val we don't have the type information, which is not stored in a struct. *)
-      match (x, y) with
-      | Struct (xfld, xins), Struct (yfld, yins) ->
-          let* () = deg_equiv (perm_of_ins xins) (perm_of_ins yins) in
-          BwdM.miterM
-            (fun [ (fld, _) ] ->
-              let xv =
-                match Abwd.find_opt fld xfld with
-                | Some xv -> xv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val xtm) = Lazy.force (fst xv) in
-              let yv =
-                match Abwd.find_opt fld yfld with
-                | Some yv -> yv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val ytm) = Lazy.force (fst yv) in
-              equal_at ctx xtm ytm (tyof_field x ty fld))
-            [ fields ]
-      | Struct _, _ | _, Struct _ -> fail
-      | _ -> equal_val ctx x y)
   (* At a datatype, two constructors are equal if they are instances of the same constructor, with the same dimension and arguments.  Again, we handle these cases here because we can use the datatype information to give types to the arguments of the constructor.  We require the datatype to be applied to all its indices, and we check the dimension. *)
   | Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ } -> (
       match (x, y) with

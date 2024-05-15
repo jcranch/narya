@@ -1,5 +1,3 @@
-open Bwd
-open Util
 open Dim
 
 module Raw = struct
@@ -30,29 +28,73 @@ let intern_ori (str : string) (pbij : Pbij_strings.t) : raw_or_index option =
   | Some n -> if Pbij_strings.is_empty pbij then Some (`Index n) else None
   | None -> Some (`Raw (intern str pbij))
 
-type checked = string
+type t = string
 
-let string_of_checked (fld : checked) : string = fld
-let strings_of_checked (fld : checked) : string * string list = (fld, [])
+let to_string x = x
 
-(* Note that raw_or_index can be coerced into this type. *)
-type any = [ `Raw of raw | `Checked of checked | `Index of int ]
+type _ base =
+  | Lower_base : t -> 's base
+  | Higher_base : { name : t; intrinsic : 'n D.pos } -> potential base
+
+(* 'intrinsic = intrinsic dimension of the field
+   'unused = the unused part of 'intrinsic, still needing to be taken up by a substitution
+   'ambient = the ambient dimension to which we've been substituted
+   'remaining = the dimension remaining of that substitution after taking up some of 'intrinsic
+   thus 'intrinsic - 'unused = 'ambient - 'remaining are the dimensions related bijectively.
+*)
+type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
+  name : t;
+  pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
+}
+
+let make_checked :
+    type unused intrinsic ambient remaining.
+    t ->
+    (unused, intrinsic, ambient, remaining) pbij ->
+    (unused, intrinsic, ambient, remaining) checked =
+ fun name pbij -> { name; pbij }
+
+let equal :
+    type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
+    (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> (x1, x2) Util.Monoid.compare =
+ fun _ _ -> Util.Sorry.e ()
+
+let is_equal :
+    type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
+    (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> bool =
+ fun x y ->
+  match equal x y with
+  | Eq -> true
+  | Neq -> false
+
+let strings_of_checked (fld : ('a, 'ax, 'by, 'b) checked) : string * string list =
+  (fld.name, Pbij_strings.to_strings (strings_of_pbij fld.pbij))
+
+let string_of_checked (fld : ('a, 'ax, 'by, 'b) checked) : string =
+  let name, pbij = strings_of_checked fld in
+  String.concat "." (name :: pbij)
+
+type any = Raw : raw -> any | Checked : (D.zero, 'ax, 'by, 'b) checked -> any | Index : int -> any
+
+let any_of_raw_ori : raw_or_index -> any = function
+  | `Raw fld -> Raw fld
+  | `Index n -> Index n
 
 let string_of_any : any -> string = function
-  | `Raw fld -> string_of_raw fld
-  | `Checked fld -> string_of_checked fld
-  | `Index i -> string_of_int i
+  | Raw fld -> string_of_raw fld
+  | Checked fld -> string_of_checked fld
+  | Index i -> string_of_int i
 
-(* Check that a raw field can appear in a codata declaration, hence that its pbij can have by=0 (textually, that there are no numbers in it).  Currently we also require ax=0, since we don't have higher fields. *)
-let check_zero : raw -> checked option =
- fun fld -> if Pbij_strings.is_empty fld.pbij then Some fld.name else None
+type wrap_checked = Wrap : (D.zero, 'kx, 'ky, 'y) checked -> wrap_checked
 
-(* Check that a raw field matches a checked field. *)
-let checks_to : raw -> checked -> bool =
- fun rfld cfld -> Pbij_strings.is_empty rfld.pbij && rfld.name = cfld
+(* Check that a raw field can appear in a codata declaration, hence that its pbij can have by=0 (textually, that there are no numbers in it).  Currently we also require ax=0, since we don't have higher fields.  TODO. *)
+type check_zero = Check_zero : ('a, 'ax, 'by, 'b) checked -> check_zero | Uncheck
 
-let find (fields : (checked, 'a) Abwd.t) (fld : any) : (checked * 'a) option =
-  match fld with
-  | `Checked fld -> Bwd.find_opt (fun (cfld, _) -> fld = cfld) fields
-  | `Index n -> Mbwd.fwd_nth_opt fields n
-  | `Raw fld -> Bwd.find_opt (fun (cfld, _) -> checks_to fld cfld) fields
+let check_zero : raw -> check_zero =
+ fun fld ->
+  if Pbij_strings.is_empty fld.pbij then Check_zero { name = fld.name; pbij = zero D.zero }
+  else Uncheck
+
+(* Check that a raw field matches a checked field. TODO *)
+let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Util.Monoid.compare =
+ fun _rfld _cfld -> Util.Sorry.e () (* Pbij_strings.is_empty rfld.pbij && rfld.name = cfld.name *)

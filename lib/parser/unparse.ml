@@ -235,8 +235,8 @@ let rec unparse :
       unlocated
         (outfix ~notn:parens ~ws:[]
            ~inner:
-             (Abwd.fold
-                (fun fld (tm, l) acc ->
+             (Bwd.fold_left
+                (fun acc (Structfield { name = fld; value = tm; labeled = l }) ->
                   let tm = unparse vars tm Interval.entire Interval.entire in
                   Snoc
                     ( acc,
@@ -255,7 +255,7 @@ let rec unparse :
                                  ~inner:Emp ~last:tm ~left_ok:(No.le_refl No.minus_omega)
                                  ~right_ok:(No.le_refl No.minus_omega))
                         | `Unlabeled -> tm) ))
-                fields Emp))
+                Emp fields))
   (* Not yet unparsing comatches *)
   (*
   | Struct (Noeta, fields) ->

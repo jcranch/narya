@@ -170,9 +170,10 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
   | Field (tm, fld) ->
       let (Val etm) = eval env tm in
       Val (field etm fld)
-  | Struct (_, fields) ->
-      Val
-        (Struct (Abwd.map (fun (tm, l) -> (lazy (eval env tm), l)) fields, ins_zero (dim_env env)))
+  | Struct (_, dim, fieldnames, fields) ->
+      let (Id_ins mk) = id_ins (dim_env env) dim in
+      (* It's okay to use ins_zero here, even though the struct might be higher-dimensional (e.g. a Gel), because the insertion gets extended to the right as necessary when it's acted on, by insfact_comp. *)
+      Val (Struct (fieldnames, eval_structfields env mk fieldnames fields, ins_zero (dom_ins mk)))
   | Constr (constr, n, args) ->
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
@@ -378,35 +379,58 @@ and tyof_app :
   inst out out_args
 
 (* Compute a field of a structure, at a particular dimension. *)
-and field : kinetic value -> Field.checked -> kinetic value =
+and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> kinetic value =
  fun tm fld ->
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
-  | Struct (fields, _) ->
-      let xv =
-        match Abwd.find_opt fld fields with
-        | Some xv -> xv
-        | None -> fatal (Anomaly "missing field in eval") in
-      let (Val x) = Lazy.force (fst xv) in
-      x
+  | Struct (_, fields, _) ->
+      Bwd.find_map (lower_field fld.name) fields <|> Anomaly "missing field in eval"
   | Uninst (Neu { head; args; alignment }, (lazy ty)) -> (
       let newty = lazy (tyof_field tm ty fld) in
-      let args = Snoc (args, App (Field fld, ins_zero D.zero)) in
+      let args = Snoc (args, App (Field fld, ins_zero (ambient_pbij fld.pbij))) in
       match alignment with
       | True -> Uninst (Neu { head; args; alignment = True }, newty)
-      | Chaotic (Struct (fields, _)) -> (
-          let x =
-            match Abwd.find_opt fld fields with
-            | Some x -> x
-            | None -> fatal (Anomaly "missing field in eval") in
-          match Lazy.force (fst x) with
-          | Realize x -> x
-          | Val x -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
-          | Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
-          | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty))
+      | Chaotic (Struct (_, fields, _)) ->
+          Bwd.find_map
+            (function
+              | Higher_structfield f -> (
+                  match Field.equal f.name fld with
+                  | Eq ->
+                      Some
+                        (match f.memo with
+                        | Some x -> aligned_field head args newty x
+                        | None ->
+                            (* TODO: Extract a permutation and a sum from pm, now that unused=0. *)
+                            let e =
+                              eval (Shift (Act (f.env, Sorry.e ()), Sorry.e (), f.degen)) f.value
+                            in
+                            f.memo <- Some e;
+                            aligned_field head args newty e)
+                  | Neq -> None)
+              | Lower_structfield { name; value; _ } ->
+                  if name = fld.name then Some (aligned_field head args newty (Lazy.force value))
+                  else None)
+            fields
+          <|> Anomaly "missing field in eval"
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
-  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, `Checked fld))
+  | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, Checked fld))
+
+and lower_field : type m. Field.t -> (kinetic, m) structfield -> kinetic value option =
+ fun fldname (Lower_structfield { name; value; _ }) ->
+  if name = fldname then
+    let (Val x) = Lazy.force value in
+    Some x
+  else None
+
+and aligned_field :
+    const head -> app Bwd.t -> kinetic value Lazy.t -> potential evaluation -> kinetic value =
+ fun head args newty e ->
+  match e with
+  | Realize x -> x
+  | Val x -> Uninst (Neu { head; args; alignment = Chaotic x }, newty)
+  | Unrealized -> Uninst (Neu { head; args; alignment = True }, newty)
+  | Canonical c -> Uninst (Neu { head; args; alignment = Lawful c }, newty)
 
 (* Given a term and its record type, compute the type of a field projection.  The caller can control the severity of errors, depending on whether we're typechecking (Error) or normalizing (Bug, the default). *)
 and tyof_field_withname :
@@ -414,16 +438,13 @@ and tyof_field_withname :
     kinetic value ->
     kinetic value ->
     Field.any ->
-    Field.checked * kinetic value =
+    Field.wrap_checked * kinetic value =
  fun ?severity tm ty fld ->
   let (Fullinst (ty, tyargs)) = full_inst ?severity ty "tyof_field" in
   match ty with
   | Neu
-      {
-        head = Const { name = const; _ };
-        alignment = Lawful (Codata { eta = _; env; ins; fields });
-        _;
-      } -> (
+      { head = Const { name = const; _ }; alignment = Lawful (Codata { eta = _; ins; fields }); _ }
+    -> (
       (* The type cannot have a nonidentity degeneracy applied to it (though it can be at a higher dimension). *)
       if Option.is_none (is_id_ins ins) then
         fatal ?severity (No_such_field (`Degenerated_record, fld));
@@ -450,11 +471,12 @@ and tyof_field_withname :
                             CubeOf.find tyargs' (sface_plus_sface fa mn pq fb));
                       });
               } in
-          let env = Value.Ext (env, entries) in
-          match Field.find fields fld with
-          | Some (fldname, fldty) ->
+          match find_codatafield fields fld with
+          | Some (Full_codatafield { env; name = fldname; higher = _; ty = fldty }) ->
+              let env = Value.Ext (env, entries) in
               let (Val efldty) = eval env fldty in
-              ( fldname,
+              (* TODO: In the higher case, I think we need to readback this and then re-evaluate it in a different environment. *)
+              ( Wrap fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)
                 inst efldty
                   (TubeOf.mmap
@@ -469,13 +491,86 @@ and tyof_field_withname :
           | None -> fatal ?severity (No_such_field (`Record (PConstant const), fld))))
   | _ -> fatal ?severity (No_such_field (`Other, fld))
 
-and tyof_field ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.checked) :
+and tyof_field :
+    type kx ky y.
+    ?severity:Asai.Diagnostic.severity ->
+    kinetic value ->
+    kinetic value ->
+    (D.zero, kx, ky, y) Field.checked ->
     kinetic value =
-  snd (tyof_field_withname ?severity tm ty (`Checked fld))
+ fun ?severity tm ty fld -> snd (tyof_field_withname ?severity tm ty (Checked fld))
 
-and tyof_field_raw ?severity (tm : kinetic value) (ty : kinetic value) (fld : Field.raw_or_index) :
-    Field.checked * kinetic value =
-  tyof_field_withname ?severity tm ty (fld :> Field.any)
+and tyof_field_raw :
+    ?severity:Asai.Diagnostic.severity ->
+    kinetic value ->
+    kinetic value ->
+    Field.raw_or_index ->
+    Field.wrap_checked * kinetic value =
+ fun ?severity tm ty fld -> tyof_field_withname ?severity tm ty (Field.any_of_raw_ori fld)
+
+and eval_structfields :
+    type m b k mk s eta.
+    ?newfields:(s, mk) Value.structfield Bwd.t ->
+    (m, b) env ->
+    (mk, m, k) insertion ->
+    s Field.base list ->
+    (b, s, eta) Term.structfield Bwd.t ->
+    (s, mk) Value.structfield Bwd.t =
+ fun ?(newfields = Emp) env mk fieldnames fields ->
+  match fieldnames with
+  | [] -> newfields
+  | Lower_base fldname :: fieldnames ->
+      let newfld =
+        Bwd.find_map (eval_lower_structfield env fldname) fields
+        <|> Anomaly "missing field in eval_structfields" in
+      eval_structfields ~newfields:(Snoc (newfields, newfld)) env mk fieldnames fields
+  | Higher_base { name; intrinsic } :: fieldnames ->
+      eval_higher_structfield newfields env mk name intrinsic
+        (pbijs (D.pos intrinsic) (dom_ins mk))
+        fieldnames fields
+
+and eval_lower_structfield :
+    type m mk b s eta.
+    (m, b) env -> Field.t -> (b, s, eta) Term.structfield -> (s, mk) Value.structfield option =
+ fun env fldname fld ->
+  match fld with
+  | Lower_structfield { name; value; labeled } when name = fldname ->
+      Some (Lower_structfield { name = fldname; value = lazy (eval env value); labeled })
+  | _ -> None
+
+and eval_higher_structfield :
+    type m b k intrinsic mk eta.
+    (potential, mk) Value.structfield Bwd.t ->
+    (m, b) env ->
+    (mk, m, k) insertion ->
+    Field.t ->
+    intrinsic D.pos ->
+    (intrinsic, mk) any_pbij list ->
+    potential Field.base list ->
+    (b, potential, eta) Term.structfield Bwd.t ->
+    (potential, mk) Value.structfield Bwd.t =
+ fun newfields env mk fld intr pbijs fieldnames fields ->
+  match pbijs with
+  | [] -> eval_structfields ~newfields env mk fieldnames fields
+  | Any p :: pbijs ->
+      let (Pbij_of_plus (pm, pk, _)) = pbij_of_plus mk p in
+      let fldname = Field.make_checked fld pk in
+      let newfld =
+        Bwd.find_map
+          (function
+           | Term.Higher_structfield { name; intrinsic; degen; value } -> (
+               match (Field.equal fldname name, compare (D.pos intr) (D.pos intrinsic)) with
+               | Eq, Eq ->
+                   let name = Field.make_checked fld p in
+                   Some
+                     (Higher_structfield
+                        { name; env; intrinsic; mk; pm; pk; degen; value; memo = None })
+               | _ -> None)
+           | _ -> None
+            : (b, potential, eta) Term.structfield -> (potential, mk) Value.structfield option)
+          fields
+        <|> Anomaly "field not found in eval_structfields" in
+      eval_higher_structfield (Snoc (newfields, newfld)) env mk fld intr pbijs fieldnames fields
 
 and eval_binder :
     type m n mn b s.
@@ -527,9 +622,15 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
           (fun (Term.Dataconstr { args; indices }) -> Value.Dataconstr { env; args; indices })
           constrs in
       Data { dim = dim_env env; indices = Emp; missing = N.zero_plus i; constrs }
+  (* TODO: When a codatatype has higher fields, they shouldn't be evaluated in the context at all when typechecking things at that type, but in its degenerated version.  How do we do that? *)
   | Codata (eta, n, fields) ->
       let (Id_ins ins) = id_ins (dim_env env) n in
-      Codata { eta; env; ins; fields }
+      let fields =
+        Bwd.map
+          (fun (Term.Codatafield { name; plusmap; higher; ty }) ->
+            Value.Codatafield { env; name; higher; ty })
+          fields in
+      Codata { eta; ins; fields }
 
 and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =
  fun env tm ->
