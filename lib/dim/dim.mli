@@ -499,6 +499,13 @@ module Plusmap : sig
   end
 
 type (_, _, _, _) pbij
+
+val zero : 'a D.t -> ('a, 'a, D.zero, D.zero) pbij
+val unused_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'x D.t
+val intrinsic_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'kx D.t
+val ambient_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'ky D.t
+val remaining_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'y D.t
+
 type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
 
 val pbijs : 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij list
@@ -514,6 +521,29 @@ module Pbij_strings : sig
 end
 
 val pbij_of_strings : Pbij_strings.t -> 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij option
+val strings_of_pbij : ('a, 'ax, 'by, 'b) pbij -> Pbij_strings.t
+
+type (_, _, _) comp_deg_pbij =
+  | Comp_deg_pbij : ('x, 'kx, 'kz, 'z) pbij * ('y, 'z) deg -> ('kx, 'kz, 'y) comp_deg_pbij
+
+val comp_deg_pbij : ('ky, 'n) deg -> ('x, 'kx, 'ky, 'y) pbij -> ('kx, 'n, 'y) comp_deg_pbij
+
+type (_, _, _) comp_pbij_deg =
+  | Comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
+
+val comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('m, 'ky) deg -> ('x, 'kx, 'm) comp_pbij_deg
+
+type (_, _, _, _, _) pbij_of_plus =
+  | Pbij_of_plus :
+      ('unused, 'i, 'm, 'mrem) pbij
+      * ('i, 'intrinsic, 'k, 'krem) pbij
+      * ('mrem, 'krem, 'remaining) D.plus
+      -> ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
+
+val pbij_of_plus :
+  ('m, 'k, 'mk) D.plus ->
+  ('unused, 'intrinsic, 'mk, 'remaining) pbij ->
+  ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
 
 (*  *)
 val one : one D.t
