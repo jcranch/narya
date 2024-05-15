@@ -381,6 +381,7 @@ module rec Value : sig
     | Ext : ('n, 'b) env * ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('n, ('b, 'k) snoc) env
     | Act : ('n, 'b) env * ('m, 'n) op -> ('m, 'b) env
     | Permute : ('a, 'b) Tbwd.permute * ('n, 'b) env -> ('n, 'a) env
+    | Shift : ('mn, 'b) env * ('m, 'n, 'mn) D.plus * ('n, 'b, 'nb) Plusmap.t -> ('m, 'nb) env
 end = struct
   (* Here is the recursive application of the functor Cube.  First we define a module to pass as its argument, with type defined to equal the yet-to-be-defined binder, referred to recursively. *)
   module BindFam = struct
@@ -514,6 +515,7 @@ end = struct
     | Ext : ('n, 'b) env * ('k, ('n, kinetic value) CubeOf.t) CubeOf.t -> ('n, ('b, 'k) snoc) env
     | Act : ('n, 'b) env * ('m, 'n) op -> ('m, 'b) env
     | Permute : ('a, 'b) Tbwd.permute * ('n, 'b) env -> ('n, 'a) env
+    | Shift : ('mn, 'b) env * ('m, 'n, 'mn) D.plus * ('n, 'b, 'nb) Plusmap.t -> ('m, 'nb) env
 end
 
 open Value
@@ -531,6 +533,7 @@ let rec dim_env : type n b. (n, b) env -> n D.t = function
   | Ext (e, _) -> dim_env e
   | Act (_, op) -> dom_op op
   | Permute (_, e) -> dim_env e
+  | Shift (e, mn, _) -> D.plus_left mn (dim_env e)
 
 (* And likewise every binder *)
 let dim_binder : type m s. (m, s) binder -> m D.t = function

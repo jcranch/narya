@@ -27,6 +27,32 @@ let rec env_top : type n a. (n, a) env -> (n, a) env_decomp = function
                 { map = (fun _ [ ys ] -> act_value_cube (CubeOf.subcube fb ys) fa) }
                 [ xs ] ))
   | Permute (p, env) -> env_top (permute_env p env)
+  | Shift (env, m_n, n_plus) -> (
+      let m = D.plus_left m_n (dim_env env) in
+      match env_top env with
+      | Emp _ ->
+          let Map_emp = n_plus in
+          Emp m
+      | Ext (env, xss) ->
+          let (Map_snoc (plus, n_k)) = n_plus in
+          (* We have to rearrange a k-cube of (m+n)-cubes into a (n+k)-cube of m-cubes.  If we stored (a+b)-cubes in environments instead of b-cubes of a-cubes in the first place, this would become a simple appeal to associativity of dimension addition. *)
+          let nk = D.plus_out (D.plus_right m_n) n_k in
+          Ext
+            ( Shift (env, m_n, plus),
+              CubeOf.build nk
+                {
+                  build =
+                    (fun fbc ->
+                      let (SFace_of_plus (_, fb, fc)) = sface_of_plus n_k fbc in
+                      let xs = CubeOf.find xss fc in
+                      CubeOf.build m
+                        {
+                          build =
+                            (fun fa ->
+                              let (Plus i_j) = D.plus (dom_sface fb) in
+                              CubeOf.find xs (sface_plus_sface fa m_n i_j fb));
+                        });
+                } ))
 
 (* Note that the return entry is n-dimensional, since all the operator actions have to be applied as we pull it out. *)
 and select_env :

@@ -28,6 +28,12 @@ let lookup : type n b. (n, b) env -> b index -> kinetic value =
     | Emp _, _ -> .
     (* If we encounter an operator action, we accumulate it. *)
     | Act (env, op'), _ -> lookup env v (comp_op op' op)
+    (* If we encounter a shift, we split the face associated to our index and accumulate part of it into the operator. *)
+    | Shift (env, mn, nb), Index (v, fab) ->
+        let (Unmap_insert (nk, v, _)) = Plusmap.unmap_insert v nb in
+        let (SFace_of_plus (_, fa, fb)) = sface_of_plus nk fab in
+        let (Plus x) = D.plus (dom_sface fa) in
+        lookup env (Index (v, fb)) (op_plus_op op mn x (op_of_sface fa))
     (* If the environment is permuted, we apply the permutation to the index. *)
     | Permute (p, env), Index (v, fa) ->
         let (Permute_insert (v, _)) = Tbwd.permute_insert v p in
