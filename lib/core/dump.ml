@@ -30,16 +30,17 @@ let rec value : type s. formatter -> s value -> unit =
   | Inst { tm; dim = d; args = _; tys = _ } ->
       fprintf ppf "Inst (%a, %a, ?, ?)" uninst tm dim (D.pos d)
   | Lam (_, _) -> fprintf ppf "Lam ?"
-  | Struct (f, _) -> fprintf ppf "Struct (%a)" fields f
+  | Struct (_, f, _) -> fprintf ppf "Struct (%a)" fields f
   | Constr (_, _, _) -> fprintf ppf "Constr ?"
 
-and fields :
-    type s. formatter -> (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t -> unit =
+and fields : type s ambient. formatter -> (s, ambient) Value.structfield Bwd.t -> unit =
  fun ppf -> function
   | Emp -> fprintf ppf "Emp"
-  | Snoc (flds, (f, ((lazy v), l))) ->
-      fprintf ppf "%a <: (%s, %a, %s)" fields flds (Field.to_string f) evaluation v
-        (match l with
+  | Snoc (flds, Higher_structfield { name; _ }) ->
+      fprintf ppf "%a <: (%s, ...)" fields flds (Field.string_of_checked name)
+  | Snoc (flds, Lower_structfield { name; labeled; _ }) ->
+      fprintf ppf "%a <: (%s, ..., %s)" fields flds (Field.to_string name)
+        (match labeled with
         | `Unlabeled -> "`Unlabeled"
         | `Labeled -> "`Labeled")
 
@@ -71,7 +72,7 @@ and app : formatter -> app -> unit =
 and arg : type n. formatter -> n arg -> unit =
  fun ppf -> function
   | Arg xs -> value ppf (CubeOf.find_top xs).tm
-  | Field fld -> fprintf ppf ".%s" (Field.to_string fld)
+  | Field fld -> fprintf ppf ".%s" (Field.string_of_checked fld)
 
 and alignment : type h. formatter -> h alignment -> unit =
  fun ppf al ->
@@ -99,6 +100,8 @@ and env : type b n. formatter -> (n, b) Value.env -> unit =
   | Emp d -> fprintf ppf "Emp %a" dim d
   | Ext (e, _) -> fprintf ppf "%a <: ?" env e
   | Act (e, Op (f, d)) -> fprintf ppf "%a <* (%s,%s)" env e (string_of_sface f) (string_of_deg d)
+  | Permute (_, e) -> fprintf ppf "(%a) permuted(?)" env e
+  | Shift (e, mn, _) -> fprintf ppf "%a << %a" env e dim (D.plus_right mn)
 
 and term : type b s. formatter -> (b, s) term -> unit =
  fun ppf tm ->
@@ -107,7 +110,7 @@ and term : type b s. formatter -> (b, s) term -> unit =
   | Const c -> fprintf ppf "Const %a" pp_printed (print (PConstant c))
   | Meta v -> fprintf ppf "Meta %a" pp_printed (print (PMeta v))
   | MetaEnv (v, _) -> fprintf ppf "MetaEnv (%a,?)" pp_printed (print (PMeta v))
-  | Field (tm, fld) -> fprintf ppf "Field (%a, %s)" term tm (Field.to_string fld)
+  | Field (tm, fld) -> fprintf ppf "Field (%a, %s)" term tm (Field.string_of_checked fld)
   | UU n -> fprintf ppf "UU %a" dim n
   | Inst (tm, _) -> fprintf ppf "Inst (%a, ?)" term tm
   | Pi (_, _, _) -> fprintf ppf "Pi (?, ?, ?)"
@@ -116,7 +119,7 @@ and term : type b s. formatter -> (b, s) term -> unit =
   | Constr (c, _, _) -> fprintf ppf "Constr (%s, ?, ?)" (Constr.to_string c)
   | Act (tm, s) -> fprintf ppf "Act (%a, %s)" term tm (string_of_deg s)
   | Let (_, _, _) -> fprintf ppf "Let (?,?,?)"
-  | Struct (_, _, _) -> fprintf ppf "Struct (?,?,?)"
+  | Struct (_, _, _, _) -> fprintf ppf "Struct (?,?,?,?)"
   | Match (_, _, _) -> fprintf ppf "Match (?,?,?)"
   | Realize tm -> fprintf ppf "Realize (%a)" term tm
   | Canonical c -> fprintf ppf "Canonical (%a)" canonical c
@@ -128,9 +131,9 @@ and canonical : type b. formatter -> b canonical -> unit =
       fprintf ppf "Data (%d, (%s))" (N.to_int i)
         (String.concat ","
            (List.map (fun (c, _) -> Constr.to_string c) (Constr.Map.bindings constrs)))
-  | Codata (eta, _dim, fields) ->
+  | Codata (eta, _dim, _fields) ->
       fprintf ppf "Codata (%s, ?, (%s))"
         (match eta with
         | Eta -> "Eta"
         | Noeta -> "Noeta")
-        (String.concat "," (List.map (fun (f, _) -> Field.to_string f) (Bwd.to_list fields)))
+        (String.concat "," (List.map (fun (f, _) -> Field.to_string f) (Sorry.e ())))

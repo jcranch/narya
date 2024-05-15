@@ -20,12 +20,12 @@ let add (x : 'k) (a : 'a) (map : ('k, 'a) t) = Snoc (map, (x, a))
 let fold (f : 'k -> 'a -> 'acc -> 'acc) (map : ('k, 'a) t) (start : 'acc) =
   Bwd.fold_left (fun acc (x, a) -> f x a acc) start map
 
-let rec find_opt_and_update_key (oldkey : 'k) (newkey : 'k) (map : ('k, 'a) t) =
+let rec find_opt_and_update_key (test : 'k -> bool) (newkey : 'k) (map : ('k, 'a) t) =
   match map with
   | Emp -> None
   | Snoc (map, (x, y)) -> (
-      match find_opt_and_update_key oldkey newkey map with
+      match find_opt_and_update_key test newkey map with
       | Some (v, newmap) -> Some (v, Snoc (newmap, (x, y)))
-      | None -> if x = oldkey then Some (y, Snoc (map, (newkey, y))) else None)
+      | None -> if test x then Some (y, Snoc (map, (newkey, y))) else None)
 
 let bindings (map : ('k, 'a) t) = Bwd.to_list map

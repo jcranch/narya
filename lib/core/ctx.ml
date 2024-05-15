@@ -284,12 +284,14 @@ module Ordered = struct
     match
       miterM
         {
-          it = (fun fa [ x ] s -> if Binding.level x = Some i then ((), Some (Top fa)) else ((), s));
+          it =
+            (fun fa [ x ] s ->
+              if Binding.level x = Some i then ((), Some (Index (Now, fa))) else ((), s));
         }
         [ vars ] None
     with
     | (), Some v -> Some v
-    | (), None -> Option.map (fun v -> Pop v) (find_level ctx i)
+    | (), None -> Option.map (fun (Index (v, fa)) -> Index (Later v, fa)) (find_level ctx i)
 
   (* Every context has an underlying environment that substitutes each (level) variable for itself (index).  This environment ALWAYS HAS DIMENSION ZERO, and therefore in particular the variables don't need to come with any boundaries. *)
   let rec env : type a b. (a, b) t -> (D.zero, b) env = function

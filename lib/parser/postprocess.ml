@@ -56,7 +56,13 @@ let rec process :
           | Synth vfn -> (
               let fn = { value = vfn; loc = fn.loc } in
               match arg.value with
-              | Field (fld, _) -> { value = Synth (Field (fn, Field.intern_ori fld)); loc }
+              | Field (fld, strs, _) -> (
+                  match Pbij_strings.of_strings strs with
+                  | Some pbij -> (
+                      match Field.intern_ori fld pbij with
+                      | Some fld -> { value = Synth (Field (fn, fld)); loc }
+                      | None -> fatal ?loc:arg.loc (Positional_higher_method (fld, strs)))
+                  | None -> fatal ?loc:arg.loc (Invalid_field (fld, strs)))
               | _ -> { value = Synth (Raw.App (fn, process ctx arg)); loc })
           | Constr (head, args) ->
               let arg = process ctx arg in

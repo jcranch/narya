@@ -202,18 +202,21 @@ let canonicalize (rng : Position.range) : string -> Token.t t = function
   | "..." -> return Ellipsis
   | "_" -> return Underscore
   | s -> (
-      match String.split_on_char '.' s with
-      | [] -> fatal (Anomaly "canonicalizing empty string")
-      | [ ""; "" ] -> return Dot (* Shouldn't happen, we already tested for dot *)
-      | [ ""; field ] -> return (Field field)
-      | [ constr; "" ] -> return (Constr constr)
-      | parts when List.for_all ok_ident parts -> return (Ident parts)
-      | "" :: parts when List.nth parts (List.length parts - 1) = "" ->
-          fatal ~loc:(Range.convert rng) Parse_error
-      | "" :: _ -> fatal ~loc:(Range.convert rng) (Invalid_field s)
-      | parts when List.nth parts (List.length parts - 1) = "" ->
-          fatal ~loc:(Range.convert rng) (Invalid_constr s)
-      | _ -> fatal ~loc:(Range.convert rng) Parse_error)
+      let parts = String.split_on_char '.' s in
+      let bwdparts = Bwd.of_list parts in
+      match (parts, bwdparts) with
+      | [], _ -> fatal (Anomaly "canonicalizing empty string")
+      (* Can't both start and end with a . *)
+      | "" :: _, Snoc (_, "") -> fatal ~loc:(Range.convert rng) Parse_error
+      (* Starting with a . makes a field *)
+      | "" :: field :: pbij, _ -> return (Field (field, pbij))
+      (* Ending with a . (and containing no internal .s) makes a constr *)
+      | _, Snoc (Snoc (Emp, constr), "") -> return (Constr constr)
+      | _, Snoc (_, "") ->
+          fatal ~loc:(Range.convert rng) (Unimplemented ("higher constructors: " ^ s))
+      (* Otherwise, all the parts must be identifiers. *)
+      | parts, _ when List.for_all ok_ident parts -> return (Ident parts)
+      | _, _ -> fatal ~loc:(Range.convert rng) Parse_error)
 
 (* An identifier is a list of one or more other characters, canonicalized. *)
 let other : Token.t t =

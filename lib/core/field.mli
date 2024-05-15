@@ -1,21 +1,58 @@
+open Dim
 open Util
+open Energy
 
-module Field : sig
+module Raw : sig
   type t
 
   val compare : t -> t -> int
 end
 
-type t = Field.t
+type raw = Raw.t
 
-val intern : string -> t
+val intern : string -> Pbij_strings.t -> raw
 
-module Set : module type of Set.Make (Field)
+module RawSet : module type of Set.Make (Raw)
+
+val string_of_raw : raw -> string
+
+type raw_or_index = [ `Raw of raw | `Index of int ]
+
+val string_of_raw_ori : raw_or_index -> string
+val intern_ori : string -> Pbij_strings.t -> raw_or_index option
+
+type t
 
 val to_string : t -> string
 
-type or_index = [ `Name of t | `Index of int ]
+type _ base =
+  | Lower_base : t -> 's base
+  | Higher_base : { name : t; intrinsic : 'n D.pos } -> potential base
 
-val to_string_ori : or_index -> string
-val intern_ori : string -> or_index
-val find : (Field.t, 'a) Abwd.t -> or_index -> (Field.t * 'a) option
+type ('unused, 'intrinsic, 'ambient, 'remaining) checked = {
+  name : t;
+  pbij : ('unused, 'intrinsic, 'ambient, 'remaining) pbij;
+}
+
+val make_checked :
+  t ->
+  ('unused, 'intrinsic, 'ambient, 'remaining) pbij ->
+  ('unused, 'intrinsic, 'ambient, 'remaining) checked
+
+val equal :
+  ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> ('x1, 'x2) Eq.compare
+
+val is_equal : ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> bool
+val strings_of_checked : ('a, 'ax, 'by, 'b) checked -> string * string list
+val string_of_checked : ('a, 'ax, 'by, 'b) checked -> string
+
+type any = Raw : raw -> any | Checked : (D.zero, 'ax, 'by, 'b) checked -> any | Index : int -> any
+
+val any_of_raw_ori : raw_or_index -> any
+val string_of_any : any -> string
+
+type wrap_checked = Wrap : (D.zero, 'kx, 'ky, 'y) checked -> wrap_checked
+type check_zero = Check_zero : ('a, 'ax, 'by, 'b) checked -> check_zero | Uncheck
+
+val check_zero : raw -> check_zero
+val checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Eq.compare

@@ -89,10 +89,9 @@ let rec act_value : type m n s. s value -> (m, n) deg -> s value =
   | Lam (x, body) ->
       let (Of fa) = deg_plus_to s (dim_binder body) ~on:"lambda" in
       Lam (act_variables x fa, act_binder body fa)
-  | Struct (fields, ins) ->
+  | Struct (fieldnames, fields, ins) ->
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
-      Struct
-        (Abwd.map (fun (tm, l) -> (lazy (act_evaluation (Lazy.force tm) fa), l)) fields, new_ins)
+      Struct (fieldnames, act_structfields fieldnames fields fa, new_ins)
   | Constr (name, dim, args) ->
       let (Of fa) = deg_plus_to s dim ~on:"constr" in
       Constr (name, dom_deg fa, Bwd.map (fun tm -> act_value_cube tm fa) args)
@@ -124,15 +123,18 @@ and act_canonical : type m n. canonical -> (m, n) deg -> canonical =
           missing;
           constrs = Constr.Map.map (fun c -> act_dataconstr c fa) constrs;
         }
-  | Codata { eta; env; ins; fields } ->
+  | Codata { eta; ins; fields } ->
       let (Of fa) = deg_plus_to s (dom_ins ins) in
-      let (Act_closure (env, ins)) = act_closure env ins fa in
-      Codata { eta; env; ins; fields }
+      let (Insfact (fc, ins)) = insfact (comp_deg (perm_of_ins ins) fa) (plus_of_ins ins) in
+      let fields = Bwd.map (fun f -> act_codatafield f fc) fields in
+      Codata { eta; ins; fields }
 
 and act_dataconstr : type m n i. (n, i) dataconstr -> (m, n) deg -> (m, i) dataconstr =
- fun (Dataconstr { env; args; indices }) s ->
-  let env = Act (env, op_of_deg s) in
-  Dataconstr { env; args; indices }
+ fun (Dataconstr constr) s -> Dataconstr { constr with env = Act (constr.env, op_of_deg s) }
+
+and act_codatafield :
+    type m n k eta. (n, k, eta) codatafield -> (m, n) deg -> (m, k, eta) codatafield =
+ fun (Codatafield fld) s -> Codatafield { fld with env = Act (fld.env, op_of_deg s) }
 
 and act_uninst : type m n. uninst -> (m, n) deg -> uninst =
  fun tm s ->
@@ -256,18 +258,79 @@ and act_apps : type a b. app Bwd.t -> (a, b) deg -> any_deg * app Bwd.t =
  fun apps s ->
   match apps with
   | Emp -> (Any s, Emp)
-  | Snoc (rest, App (arg, ins)) ->
+  | Snoc (rest, App (arg, ins)) -> (
       (* To act on an application, we compose the acting degeneracy with the delayed insertion, factor the result into a new insertion to leave outside and a smaller degeneracy to push in, and push the smaller degeneracy action into the application, acting on the function/struct. *)
       let (Insfact_comp (fa, new_ins, _, _)) = insfact_comp ins s in
-      let new_arg =
-        match arg with
-        | Arg args ->
-            (* And, in the function case, on the arguments by factorization. *)
-            Arg (act_normal_cube args fa)
-        | Field fld -> Field fld in
-      (* Finally, we recurse and assemble the result. *)
+      (* We act recursively on the other arguments. *)
       let new_s, new_rest = act_apps rest fa in
-      (new_s, Snoc (new_rest, App (new_arg, new_ins)))
+      (* In the function case, we act on the arguments by factorization. *)
+      match arg with
+      | Arg args -> (new_s, Snoc (new_rest, App (Arg (act_normal_cube args fa), new_ins)))
+      | Field fld ->
+          let (Comp_pbij_deg pbij) = comp_pbij_deg fld.pbij fa in
+          (new_s, Snoc (new_rest, App (Field { fld with pbij }, new_ins))))
+
+and act_structfields :
+    type m n s.
+    ?newfields:(s, m) structfield Bwd.t ->
+    s Field.base list ->
+    (s, n) structfield Bwd.t ->
+    (m, n) deg ->
+    (s, m) structfield Bwd.t =
+ fun ?(newfields = Emp) fieldnames fields fa ->
+  match fieldnames with
+  | [] -> newfields
+  | Lower_base fld :: fieldnames -> (
+      match Bwd.find_map (act_lower_structfield fld fa) fields with
+      | None -> fatal (Anomaly "missing field in act_structfields")
+      | Some x -> act_structfields ~newfields:(Snoc (newfields, x)) fieldnames fields fa)
+  | Higher_base { name; intrinsic } :: fieldnames ->
+      act_higher_structfield newfields name intrinsic
+        (pbijs (D.pos intrinsic) (dom_deg fa))
+        fieldnames fields fa
+
+and act_lower_structfield :
+    type s m n. Field.t -> (m, n) deg -> (s, n) structfield -> (s, m) structfield option =
+ fun fldname fa fld ->
+  match fld with
+  | Lower_structfield { name; value; labeled } ->
+      if name = fldname then
+        Some
+          (Lower_structfield { name; value = lazy (act_evaluation (Lazy.force value) fa); labeled })
+      else None
+  | Higher_structfield _ -> None
+
+and act_higher_structfield :
+    type new_ambient unused intrinsic old_ambient.
+    (potential, new_ambient) structfield Bwd.t ->
+    Field.t ->
+    intrinsic D.pos ->
+    (intrinsic, new_ambient) any_pbij list ->
+    potential Field.base list ->
+    (potential, old_ambient) structfield Bwd.t ->
+    (new_ambient, old_ambient) deg ->
+    (potential, new_ambient) structfield Bwd.t =
+ fun newfields fldname intrinsic pbijs fieldnames fields fa ->
+  match pbijs with
+  | [] -> act_structfields ~newfields fieldnames fields fa
+  | Any p :: pbijs ->
+      let (Comp_deg_pbij (pbij, fb)) = comp_deg_pbij fa p in
+      let newsf =
+        Bwd.find_map
+          (function
+            | Lower_structfield _ -> None
+            | Higher_structfield { name; env; value; memo; _ } -> (
+                match Field.equal name { name = fldname; pbij } with
+                | Eq ->
+                    let name = Field.make_checked fldname p in
+                    let memo = Option.map (fun e -> act_evaluation e fb) memo in
+                    let degen, pm, pk, mk = Sorry.e () in
+                    Some
+                      (Higher_structfield { name; env; intrinsic; degen; pm; pk; mk; value; memo })
+                | Neq -> None))
+          fields
+        <|> Anomaly "missing field in act_structfields" in
+      act_higher_structfield (Snoc (newfields, newsf)) fldname intrinsic pbijs fieldnames fields fa
 
 (* Act on a cube of objects *)
 and act_value_cube : type m n s. (n, s value) CubeOf.t -> (m, n) deg -> (m, s value) CubeOf.t =

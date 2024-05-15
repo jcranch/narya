@@ -162,7 +162,7 @@ let rec get_spine :
     type b n.
     (n, kinetic) term ->
     [ `App of (n, kinetic) term * (n, kinetic) term Bwd.t
-    | `Field of (n, kinetic) term * Field.t * (n, kinetic) term Bwd.t ] =
+    | `Field of (n, kinetic) term * Field.checked * (n, kinetic) term Bwd.t ] =
  fun tm ->
   match tm with
   | App (fn, arg) -> (
@@ -245,8 +245,8 @@ let rec unparse :
       unlocated
         (outfix ~notn:parens ~ws:[]
            ~inner:
-             (Abwd.fold
-                (fun fld (tm, l) acc ->
+             (Bwd.fold_left
+                (fun acc (Structfield { name = fld; value = tm; labeled = l }) ->
                   let tm = unparse vars tm Interval.entire Interval.entire in
                   Snoc
                     ( acc,
@@ -255,7 +255,7 @@ let rec unparse :
                         | `Labeled ->
                             unlocated
                               (infix ~notn:coloneq ~ws:[]
-                                 ~first:(unlocated (Ident ([ Field.to_string fld ], [])))
+                                 ~first:(unlocated (Ident ([ Field.string_of_checked fld ], [])))
                                  ~inner:Emp ~last:tm ~left_ok:(No.le_refl No.minus_omega)
                                  ~right_ok:(No.le_refl No.minus_omega))
                         (* An unlabeled 1-tuple must be written (_ := M). *)
@@ -265,7 +265,7 @@ let rec unparse :
                                  ~inner:Emp ~last:tm ~left_ok:(No.le_refl No.minus_omega)
                                  ~right_ok:(No.le_refl No.minus_omega))
                         | `Unlabeled -> tm) ))
-                fields Emp))
+                Emp fields))
   (* Not yet unparsing comatches *)
   (*
   | Struct (Noeta, fields) ->
@@ -314,7 +314,7 @@ and unparse_spine :
     n Names.t ->
     [ `Term of (n, kinetic) term
     | `Constr of Constr.t
-    | `Field of (n, kinetic) term * Field.t
+    | `Field of (n, kinetic) term * Field.checked
     | `Degen of string
     | `Unparser of unparser ] ->
     unparser Bwd.t ->
@@ -338,7 +338,7 @@ and unparse_spine :
           match head with
           | `Term tm -> unparse vars tm li ri
           | `Constr c -> unlocated (Constr (Constr.to_string c, []))
-          | `Field (tm, fld) -> unparse_field vars tm fld li ri
+          | `Field (tm, fld) -> unparse_field vars tm fld (snd (Field.strings_of_checked fld)) li ri
           | `Degen s -> unlocated (Ident ([ s ], []))
           | `Unparser tm -> tm.unparse li ri)
       | Snoc (args, arg) -> (
@@ -361,21 +361,22 @@ and unparse_field :
     n Names.t ->
     (n, kinetic) term ->
     Field.t ->
+    string list ->
     (lt, ls) Interval.tt ->
     (rt, rs) Interval.tt ->
     (lt, ls, rt, rs) parse located =
- fun vars tm fld li ri ->
+ fun vars tm fld pbij li ri ->
   match unparse_field_var vars tm fld with
   | Some res -> res
   | None -> (
       match (Interval.contains li No.plus_omega, Interval.contains ri No.plus_omega) with
       | Some left_ok, Some right_ok ->
           let fn = unparse vars tm li Interval.plus_omega_only in
-          let arg = unlocated (Field (Field.to_string fld, [])) in
+          let arg = unlocated (Field (Field.to_string fld, pbij, [])) in
           unlocated (App { fn; arg; left_ok; right_ok })
       | _ ->
           let fn = unparse vars tm Interval.plus_omega_only Interval.plus_omega_only in
-          let arg = unlocated (Field (Field.to_string fld, [])) in
+          let arg = unlocated (Field (Field.to_string fld, pbij, [])) in
           let left_ok = No.le_refl No.plus_omega in
           let right_ok = No.le_refl No.plus_omega in
           parenthesize (unlocated (App { fn; arg; left_ok; right_ok })))

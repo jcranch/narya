@@ -2,6 +2,7 @@ open Bwd
 open Util
 open Signatures
 open Tlist
+open Tbwd
 open Monoid
 module D : MonoidPos
 module Dmap : MAP_MAKER with module Key := D
@@ -507,6 +508,95 @@ type (_, _, _) insfact_comp =
       -> ('n, 'k, 'a) insfact_comp
 
 val insfact_comp : ('nk, 'n, 'k) insertion -> ('a, 'b) deg -> ('n, 'k, 'a) insfact_comp
+
+module Plusmap : sig
+  module OfDom : module type of Tbwd.Of (D)
+  module OfCod : module type of Tbwd.Of (D) with type 'a t = 'a OfDom.t
+
+  type ('a, 'b, 'c) t =
+    | Map_emp : ('p, emp, emp) t
+    | Map_snoc : ('p, 'xs, 'ys) t * ('p, 'x, 'y) D.plus -> ('p, ('xs, 'x) snoc, ('ys, 'y) snoc) t
+
+  type ('a, 'b) exists = Exists : 'ys OfCod.t * ('p, 'xs, 'ys) t -> ('p, 'xs) exists
+
+  val exists : 'p D.t -> 'xs OfDom.t -> ('p, 'xs) exists
+  val out : 'p D.t -> 'xs OfDom.t -> ('p, 'xs, 'ys) t -> 'ys OfCod.t
+  val uniq : ('p, 'xs, 'ys) t -> ('p, 'xs, 'zs) t -> ('ys, 'zs) Eq.t
+
+  type (_, _, _, _) map_insert =
+    | Map_insert : ('zs, 'fx, 'ws) Tbwd.insert * ('p, 'ys, 'ws) t -> ('p, 'fx, 'ys, 'zs) map_insert
+
+  val insert :
+    ('p, 'x, 'z) D.plus ->
+    ('xs, 'x, 'ys) Tbwd.insert ->
+    ('p, 'xs, 'zs) t ->
+    ('p, 'z, 'ys, 'zs) map_insert
+
+  type (_, _, _, _) unmap_insert =
+    | Unmap_insert :
+        ('p, 'x, 'z) D.plus * ('xs, 'x, 'ys) Tbwd.insert * ('p, 'xs, 'zs) t
+        -> ('p, 'z, 'ys, 'zs) unmap_insert
+
+  val unmap_insert :
+    ('zs, 'z, 'ws) Tbwd.insert -> ('p, 'ys, 'ws) t -> ('p, 'z, 'ys, 'zs) unmap_insert
+
+  type (_, _, _) map_permute =
+    | Map_permute : ('p, 'zs, 'ws) t * ('ys, 'ws) Tbwd.permute -> ('p, 'zs, 'ys) map_permute
+
+  val permute : ('p, 'xs, 'ys) t -> ('xs, 'zs) Tbwd.permute -> ('p, 'zs, 'ys) map_permute
+
+  val assocl :
+    ('a, 'b, 'ab) D.plus -> ('b, 'cs, 'bcs) t -> ('a, 'bcs, 'abcs) t -> ('ab, 'cs, 'abcs) t
+
+  val zerol : 'bs OfDom.t -> (D.zero, 'bs, 'bs) t
+  end
+
+type (_, _, _, _) pbij
+
+val zero : 'a D.t -> ('a, 'a, D.zero, D.zero) pbij
+val unused_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'x D.t
+val intrinsic_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'kx D.t
+val ambient_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'ky D.t
+val remaining_pbij : ('x, 'kx, 'ky, 'y) pbij -> 'y D.t
+
+type (_, _) any_pbij = Any : ('a, 'ax, 'by, 'b) pbij -> ('ax, 'by) any_pbij
+
+val pbijs : 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij list
+
+module Pbij_strings : sig
+  type t
+
+  val empty : t
+  val is_empty : t -> bool
+  val compare : t -> t -> int
+  val of_strings : string list -> t option
+  val to_strings : t -> string list
+end
+
+val pbij_of_strings : Pbij_strings.t -> 'ax D.t -> 'by D.t -> ('ax, 'by) any_pbij option
+val strings_of_pbij : ('a, 'ax, 'by, 'b) pbij -> Pbij_strings.t
+
+type (_, _, _) comp_deg_pbij =
+  | Comp_deg_pbij : ('x, 'kx, 'kz, 'z) pbij * ('y, 'z) deg -> ('kx, 'kz, 'y) comp_deg_pbij
+
+val comp_deg_pbij : ('ky, 'n) deg -> ('x, 'kx, 'ky, 'y) pbij -> ('kx, 'n, 'y) comp_deg_pbij
+
+type (_, _, _) comp_pbij_deg =
+  | Comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('x, 'kx, 'ky) comp_pbij_deg
+
+val comp_pbij_deg : ('x, 'kx, 'ky, 'y) pbij -> ('m, 'ky) deg -> ('x, 'kx, 'm) comp_pbij_deg
+
+type (_, _, _, _, _) pbij_of_plus =
+  | Pbij_of_plus :
+      ('unused, 'i, 'm, 'mrem) pbij
+      * ('i, 'intrinsic, 'k, 'krem) pbij
+      * ('mrem, 'krem, 'remaining) D.plus
+      -> ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
+
+val pbij_of_plus :
+  ('m, 'k, 'mk) D.plus ->
+  ('unused, 'intrinsic, 'mk, 'remaining) pbij ->
+  ('unused, 'intrinsic, 'm, 'k, 'remaining) pbij_of_plus
 
 (*  *)
 type one

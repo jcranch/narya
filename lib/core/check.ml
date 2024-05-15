@@ -660,6 +660,8 @@ and check_codata :
   match raw_fields with
   | [] -> Canonical (Codata (Noeta, dim, checked_fields))
   | (fld, (x, rty)) :: raw_fields ->
+      (* TODO: When higher fields are allowed, check_zero will also return a dimension, which we have to degenerate the context by to check the field type. *)
+      let fld = Field.check_zero fld <|> Invalid_higher_method fld in
       with_codata_so_far status Noeta ctx dim tyargs checked_fields @@ fun domvars ->
       let newctx = Ctx.cube_vis ctx x domvars in
       let cty = check Kinetic newctx rty (universe D.zero) in
@@ -698,29 +700,30 @@ and check_struct :
     (b, s) status ->
     s eta ->
     (a, b) Ctx.t ->
-    (Field.t option, a check located) Abwd.t ->
+    (Field.raw option, a check located) Abwd.t ->
     kinetic value ->
-    m D.t ->
-    (Field.t, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (mn, m, n) insertion ->
+    (c, n) codatafield Bwd.t ->
     (b, s) term =
  fun status eta ctx tms ty dim fields ->
   (* The type of each record field, at which we check the corresponding field supplied in the struct, is the type associated to that field name in general, evaluated at the supplied parameters and at "the term itself".  We don't have the whole term available while typechecking, of course, but we can build a version of it that contains all the previously typechecked fields, which is all we need for a well-typed record.  So we iterate through the fields (in the order specified in the *type*, since that determines the dependencies) while also accumulating the previously typechecked and evaluated fields.  At the end, we throw away the evaluated fields (although as usual, that seems wasteful). *)
   let tms, ctms =
     check_fields status eta ctx ty dim
       (* We convert the backwards alist of fields and values into a forwards list of field names only. *)
-      (Bwd.fold_right (fun (fld, _) flds -> fld :: flds) fields [])
-      tms Emp Emp in
+      (Bwd.fold_right (fun (Codatafield { name = fld; _ }) flds -> fld :: flds) fields [])
+      (Bwd.map (fun (fld, tm) -> (`Raw fld, tm)) tms)
+      Emp Emp in
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)
   Term.Struct
     ( eta,
       dim,
       Bwd.map
         (function
-          | Some fld, _ -> (
-              match Abwd.find_opt fld ctms with
-              | Some x -> (fld, x)
+          | `Checked fld, _ -> (
+              match Bwd.find_opt (fun (Term.Structfield f) -> f.name = fld) ctms with
+              | Some x -> x
               | None -> fatal (Anomaly "missing field in check"))
-          | None, _ -> fatal (Extra_field_in_tuple None))
+          | `Raw fld, _ -> fatal (Extra_field_in_tuple fld))
         tms )
 
 and check_fields :
@@ -730,12 +733,12 @@ and check_fields :
     (a, b) Ctx.t ->
     kinetic value ->
     n D.t ->
-    Field.t list ->
-    (Field.t option, a check located) Abwd.t ->
-    (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t option, a check located) Abwd.t
-    * (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    Field.checked list ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fields tms etms ctms ->
   (* The insertion on a struct being checked is the identity, but it stores the substitution dimension of the type being checked against.  If this is a higher-dimensional record (e.g. Gel), there could be a nontrivial right dimension being trivially inserted, but that will get added automatically by an appropriate symmetry action if it happens. *)
   let str = Value.Struct (etms, ins_zero dim) in
@@ -757,46 +760,60 @@ and check_field :
     (a, b) Ctx.t ->
     kinetic value ->
     n D.t ->
-    Field.t ->
-    Field.t list ->
+    Field.checked ->
+    Field.checked list ->
     kinetic value ->
-    (Field.t option, a check located) Abwd.t ->
-    (Field.t, s evaluation Lazy.t * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
-    (Field.t option, a check located) Abwd.t
-    * (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t =
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t ->
+    s Value.structfield Bwd.t ->
+    (b, s) Term.structfield Bwd.t ->
+    ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
+    * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fld fields prev_etm tms etms ctms ->
   (* Once again we need a helper function with a declared polymorphic type in order to munge the status.  *)
   let mkstatus :
       type b s.
       (b, s) status ->
       s eta ->
-      (Field.t, (b, s) term * [ `Labeled | `Unlabeled ]) Abwd.t ->
+      (b, s) Term.structfield Bwd.t ->
       [ `Labeled | `Unlabeled ] ->
       (b, s) status =
-   fun status eta ctms lbl ->
+   fun status eta ctms labeled ->
     match status with
     | Kinetic -> Kinetic
     | Potential (c, args, hyp) ->
         Potential
           ( c,
             Snoc (args, App (Field fld, ins_zero D.zero)),
-            fun tm -> hyp (Term.Struct (eta, dim, Snoc (ctms, (fld, (tm, lbl))))) ) in
+            fun value ->
+              hyp (Term.Struct (eta, dim, Snoc (ctms, Structfield { name = fld; value; labeled })))
+          ) in
   let ety = tyof_field prev_etm ty fld in
-  match Abwd.find_opt (Some fld) tms with
-  | Some tm ->
+  match
+    Abwd.find_opt_and_update_key
+      (function
+        | `Raw (Some rfld) -> Field.checks_to rfld fld
+        | _ -> false)
+      (`Checked fld) tms
+  with
+  | Some (tm, tms) ->
       let field_status = mkstatus status eta ctms `Labeled in
       let ctm = check field_status ctx tm ety in
-      let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Labeled) etms in
-      let ctms = Snoc (ctms, (fld, (ctm, `Labeled))) in
+      let etms =
+        Snoc (etms, Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Labeled })
+      in
+      let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Labeled }) in
       check_fields status eta ctx ty dim fields tms etms ctms
   | None -> (
       let field_status = mkstatus status eta ctms `Unlabeled in
-      match Abwd.find_opt_and_update_key None (Some fld) tms with
+      match Abwd.find_opt_and_update_key (fun x -> x = `Raw None) (`Checked fld) tms with
       | Some (tm, tms) ->
           let ctm = check field_status ctx tm ety in
-          let etms = Abwd.add fld (lazy (Ctx.eval ctx ctm), `Unlabeled) etms in
-          let ctms = Snoc (ctms, (fld, (ctm, `Unlabeled))) in
+          let etms =
+            Snoc
+              ( etms,
+                Structfield { name = fld; value = lazy (Ctx.eval ctx ctm); labeled = `Unlabeled } )
+          in
+          let ctms = Snoc (ctms, Structfield { name = fld; value = ctm; labeled = `Unlabeled }) in
           check_fields status eta ctx ty dim fields tms etms ctms
       | None -> fatal (Missing_field_in_tuple fld))
 
@@ -818,7 +835,7 @@ and synth : type a b. (a, b) Ctx.t -> a synth located -> (b, kinetic) term * kin
       let stm, sty = synth ctx tm in
       (* To take a field of something, the type of the something must be a record-type that contains such a field, possibly substituted to a higher dimension and instantiated. *)
       let etm = Ctx.eval_term ctx stm in
-      let fld, newty = tyof_field_withname ~severity:Asai.Diagnostic.Error etm sty fld in
+      let fld, newty = tyof_field_raw ~severity:Asai.Diagnostic.Error etm sty fld in
       (Field (stm, fld), newty)
   | UU -> (Term.UU D.zero, universe D.zero)
   | Pi (x, dom, cod) ->
