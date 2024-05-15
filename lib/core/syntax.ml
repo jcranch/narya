@@ -53,8 +53,8 @@ module Raw = struct
   (* A normal codatatype binds one more "self" variable in the types of its fields.  A normal record type does the same, except that the user doesn't have a name for that variable and instead accesses it by lexical variables that postprocess to its fields using Varscope. *)
   and (_, _) codata_vars =
     | Cube : string option -> ('a, 'a N.suc) codata_vars
-    (* A higher-dimensional codatatype simply binds a "self" cube of variables, but unfortunately a higher-dimensional record type doesn't have any variable to make a cube.  So we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one.  (TODO: This Bwv really ought to be a forwards Vec, but that would require changing too much else for now, such as making count_faces return a Fwn.) *)
-    | Normal : ('a, 'c, 'ac) N.plus located * (string option, 'c) Bwv.t -> ('a, 'ac) codata_vars
+    (* A higher-dimensional codatatype simply binds a "self" cube of variables, but unfortunately a higher-dimensional record type doesn't have any variable to make a cube.  So we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one. *)
+    | Normal : ('a, 'c, 'ac) Fwn.bplus located * (string option, 'c) Vec.t -> ('a, 'ac) codata_vars
 
   (* An ('a, 'b, 'ab) tel is a raw telescope of length 'b in context 'a, with 'ab = 'a+'b the extended context. *)
   and (_, _, _) tel =
@@ -73,7 +73,9 @@ end
 (* ******************** Names ******************** *)
 
 type _ variables =
-  | Variables : 'm D.t * ('m, 'n, 'mn) D.plus * ('n, string option) CubeOf.t -> 'mn variables
+  | Variables :
+      'm D.t * ('m, 'n, 'mn) D.plus * (N.zero, 'n, string option, 'f) NICubeOf.t
+      -> 'mn variables
 
 type any_variables = Any : 'n variables -> any_variables
 
@@ -81,7 +83,7 @@ let dim_variables : type m. m variables -> m D.t = function
   | Variables (m, mn, _) -> D.plus_out m mn
 
 let singleton_variables : type m. m D.t -> string option -> m variables =
- fun m x -> Variables (m, D.plus_zero m, CubeOf.singleton x)
+ fun m x -> Variables (m, D.plus_zero m, NICubeOf.singleton x)
 
 let singleton_named_variables : type m. m D.t -> string option -> m variables =
  fun m x -> singleton_variables m (Some (Option.value x ~default:"x"))
@@ -200,12 +202,12 @@ end = struct
     | Let :
         string option * ('a, kinetic) term * (('a, D.zero) snoc, kinetic) term
         -> ('a, kinetic) term
-    (* Abstractions and structs can appear in any kind of term. *)
+    (* Abstractions and structs can appear in any kind of term.  The dimension 'n is the substitution dimension of the type being checked against (function-type or codata/record).  *)
     | Lam : 'n variables * (('a, 'n) snoc, 's) Term.term -> ('a, 's) term
     | Struct :
         ('s, 'eta) eta * 'k D.t * 's Field.base list * ('a, 's, 'eta) structfield Bwd.t
         -> ('a, 's) term
-    (* Matches can only appear in non-kinetic terms. *)
+    (* Matches can only appear in non-kinetic terms.  The dimension 'n is the substitution dimension of the type of the variable being matched against. *)
     | Match : 'a index * 'n D.t * ('a, 'n) branch Constr.Map.t -> ('a, potential) term
     (* A potential term is "realized" by kinetic terms, or canonical types, at its leaves. *)
     | Realize : ('a, kinetic) term -> ('a, potential) term
@@ -500,7 +502,7 @@ end = struct
     | Constr : Constr.t * 'n D.t * ('n, kinetic value) CubeOf.t Bwd.t -> kinetic value
     (* Lambda-abstractions are never types, so they can never be nontrivially instantiated.  Thus we may as well make them values directly. *)
     | Lam : 'k variables * ('k, 's) binder -> 's value
-    (* The same is true for anonymous structs.  These have to store an insertion outside, like an application.  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation.  (TODO: We are defunctionalizing this.) *)
+    (* The same is true for anonymous structs.  These have to store an insertion outside, like an application, to deal with higher-dimensional record types like Gel (here 'k would be the Gel dimension).  We also remember which fields are labeled, for readback purposes.  We store the value of each field lazily, so that corecursive definitions don't try to compute an entire infinite structure.  And since in the non-kinetic case, evaluation can produce more data than just a term (e.g. whether a case tree has yet reached a leaf), what we store lazily is the result of evaluation.  (TODO: We are defunctionalizing this.) *)
     | Struct : 's Field.base list * ('s, 'n) structfield Bwd.t * ('m, 'n, 'k) insertion -> 's value
     | Lazy : 's value Lazy.t -> 's value
 
@@ -626,7 +628,7 @@ let rec args_of_apps : type n. ?degerr:Code.t -> n D.t -> app Bwd.t -> (n, norma
   | Emp -> Emp
   | Snoc (xs, App (Arg arg, ins)) ->
       if Option.is_some (is_id_ins ins) then
-        match compare (CubeOf.dim arg) n with
+        match D.compare (CubeOf.dim arg) n with
         (* We DON'T pass on ?degerr to the recursive call, since any insertions deeper in the application spine are bugs. *)
         | Eq -> Snoc (args_of_apps n xs, arg)
         | Neq -> fatal (Dimension_mismatch ("args_of_apps", CubeOf.dim arg, n))
@@ -650,7 +652,7 @@ let rec find_codatafield (fields : ('a, 'n, 'eta) codatafield Bwd.t) (fld : Fiel
       match Mbwd.fwd_nth_opt fields n with
       | None -> None
       | Some (Codatafield { env; name; higher; ty }) -> (
-          match compare (unused_pbij name.pbij) D.zero with
+          match D.compare (unused_pbij name.pbij) D.zero with
           | Eq -> Some (Full_codatafield { env; name; higher; ty })
           | Neq -> None))
   | Snoc (fields, Codatafield { env; name; higher; ty }), Checked cfld -> (

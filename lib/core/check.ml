@@ -16,33 +16,18 @@ open Readback
 open Printable
 open Asai.Range
 
-(* Look through a specified number of lambdas to find an inner body.  TODO: Here 'b should really be a Fwn and the result should be a Vec, which suggests that faces should be counted in a Fwn, which would unfortunately be a massive change. *)
-let rec lambdas :
-    type a b ab.
-    Asai.Range.t option ->
-    (a, b, ab) N.plus ->
-    a check located ->
-    string option list * ab check located =
- fun loc ab tm ->
-  match (ab, tm.value) with
-  | Zero, _ -> ([], tm)
-  | Suc _, Lam ({ value = x; loc }, `Normal, body) ->
-      let names, body = lambdas loc (N.suc_plus ab) body in
-      (x :: names, body)
-  | _ -> fatal ?loc (Not_enough_lambdas (N.to_int (N.plus_right ab)))
-
 (* Check that a given value is a zero-dimensional type family (something where an indexed datatype could live) and return the length of its domain telescope (the number of indices).  Unfortunately I don't see an easy way to do this without essentially going through all the same steps of extending the context that we would do to check something at that type family. *)
 let rec typefam : type a b. (a, b) Ctx.t -> kinetic value -> int =
  fun ctx ty ->
   let (Fullinst (uty, tyargs)) = full_inst ~severity:Asai.Diagnostic.Error ty "typechecking" in
   match uty with
   | UU m -> (
-      match compare m D.zero with
+      match D.compare m D.zero with
       | Eq -> 0
       | Neq -> fatal (Unimplemented "higher-dimensional datatypes"))
   | Pi (x, doms, cods) -> (
       (* In practice, these dimensions will always be zero also if the function succeeds, otherwise the eventual output would have to be higher-dimensional too.  But it doesn't hurt to be more general, and will require less change if we eventually implement higher-dimensional datatypes. *)
-      match compare (TubeOf.inst tyargs) (CubeOf.dim doms) with
+      match D.compare (TubeOf.inst tyargs) (CubeOf.dim doms) with
       | Eq ->
           let newargs, newnfs = dom_vars (Ctx.length ctx) doms in
           let output = tyof_app cods tyargs newargs in
@@ -50,27 +35,40 @@ let rec typefam : type a b. (a, b) Ctx.t -> kinetic value -> int =
       | Neq -> fatal (Dimension_mismatch ("typefam", TubeOf.inst tyargs, CubeOf.dim doms)))
   | _ -> fatal (Checking_canonical_at_nonuniverse ("datatype", PVal (ctx, ty)))
 
-(* Convert a list of variable names to a cube of them.  TODO: I believe that in all places where we use this, we could in theory statically guarantee that there are the correct number of names.  But it would be most natural to have them in a Vec, which suggests that faces should be counted in a Fwn rather than a N, which would unfortunately be a massive change.  *)
-let vars_of_list m names =
-  let module S = Monad.State (struct
-    type t = string option list
-  end) in
-  let open CubeOf.Monadic (S) in
-  let names, _ =
-    buildM m
+type (_, _, _) vars_of_vec =
+  | Vars :
+      ('a, 'b, 'abc) N.plus * (N.zero, 'n, string option, 'b) NICubeOf.t
+      -> ('a, 'abc, 'n) vars_of_vec
+
+let vars_of_vec :
+    type a c abc n.
+    Asai.Range.t option ->
+    n D.t ->
+    (a, c, abc) Fwn.bplus ->
+    (string option, c) Vec.t ->
+    (a, abc, n) vars_of_vec =
+ fun loc dim abc xs ->
+  let module S = struct
+    type 'b t =
+      | Ok : (a, 'b, 'ab) N.plus * ('ab, 'c, abc) Fwn.bplus * (string option, 'c) Vec.t -> 'b t
+      | Missing of int
+  end in
+  let module Build = NICubeOf.Traverse (S) in
+  match
+    Build.build dim
       {
         build =
-          (fun _ ->
-            let open Monad.Ops (S) in
-            let* names = S.get in
-            match names with
-            | [] -> fatal (Anomaly "missing name")
-            | x :: xs ->
-                let* () = S.put xs in
-                return x);
+          (fun _ -> function
+            | Ok (ab, Suc abc, x :: xs) -> Fwrap (NFamOf x, Ok (Suc ab, abc, xs))
+            | Ok _ -> Fwrap (NFamOf None, Missing (-1))
+            | Missing j -> Fwrap (NFamOf None, Missing (j - 1)));
       }
-      names in
-  names
+      (Ok (Zero, abc, xs))
+  with
+  | Wrap (names, Ok (ab, Zero, [])) -> Vars (ab, names)
+  | Wrap (_, Ok (_, abc, _)) ->
+      fatal ?loc (Wrong_boundary_of_record (Fwn.to_int (Fwn.bplus_right abc)))
+  | Wrap (_, Missing j) -> fatal ?loc (Wrong_boundary_of_record j)
 
 (* Slurp up an entire application spine.  Returns the function, the locations of all the applications (e.g. in "f x y" returns the locations of "f x" and "f x y") and all the arguments. *)
 let spine :
@@ -131,7 +129,7 @@ let rec check :
             let xs = CubeOf.mmap { map = (fun _ [ x ] -> Ctx.Binding.value x) } [ newnfs ] in
             Potential
               (c, Snoc (args, App (Arg xs, ins_zero m)), fun tm -> hyp (Term.Lam (names, tm))) in
-      match compare (TubeOf.inst tyargs) m with
+      match D.compare (TubeOf.inst tyargs) m with
       | Neq -> fatal (Dimension_mismatch ("checking lambda", TubeOf.inst tyargs, m))
       | Eq ->
           let Eq = D.plus_uniq (TubeOf.plus tyargs) (D.zero_plus m) in
@@ -141,23 +139,37 @@ let rec check :
           let output = tyof_app cods tyargs newargs in
           let xs, cbody =
             match cube with
-            | `Normal ->
-                (* Slurp up the right number of lambdas for the dimension of the pi-type, and pick up the body inside them. *)
-                let (Faces dom_faces) = count_faces m in
-                let f = faces_out dom_faces in
-                let (Plus af) = N.plus f in
-                let names, body = lambdas None af tm in
-                let names = vars_of_list m names in
-                let xs = Variables (D.zero, D.zero_plus m, names) in
-                let status = mkstatus status m xs newnfs in
-                ( xs,
-                  check status
-                    (Ctx.vis ctx D.zero (D.zero_plus m) dom_faces af names newnfs)
-                    body output )
+            (* If the abstraction is a cube, we slurp up the right number of lambdas for the dimension of the pi-type, and pick up the body inside them.  We do this by building a cube of variables of the right dimension while maintaining the current term as an indexed state.  We also build a sum of raw lengths, since we need that to extend the context.  Note that we never need to manually "count" how many faces there are in a cube of any dimension, or discuss how to put them in order: the counting and ordering is handled automatically by iterating through a cube. *)
+            | `Normal -> (
+                let module S = struct
+                  type 'b t =
+                    | Ok : Asai.Range.t option * (a, 'b, 'ab) N.plus * 'ab check located -> 'b t
+                    | Missing of Asai.Range.t option * int
+                end in
+                let module Build = NICubeOf.Traverse (S) in
+                match
+                  Build.build m
+                    {
+                      build =
+                        (fun _ -> function
+                          | Ok (_, ab, { value = Lam ({ value = x; loc }, `Normal, body); _ }) ->
+                              Fwrap (NFamOf x, Ok (loc, Suc ab, body))
+                          | Ok (loc, _, _) -> Fwrap (NFamOf None, Missing (loc, 1))
+                          | Missing (loc, j) -> Fwrap (NFamOf None, Missing (loc, j + 1)));
+                    }
+                    (Ok (None, Zero, tm))
+                with
+                | Wrap (names, Ok (_, af, body)) ->
+                    let xs = Variables (D.zero, D.zero_plus m, names) in
+                    let status = mkstatus status m xs newnfs in
+                    ( xs,
+                      check status (Ctx.vis ctx D.zero (D.zero_plus m) af names newnfs) body output
+                    )
+                | Wrap (_, Missing (loc, j)) -> fatal ?loc (Not_enough_lambdas j))
             | `Cube ->
+                (* Here we don't need to slurp up lots of lambdas, but can make do with one. *)
                 let xs = singleton_variables m x in
                 let status = mkstatus status m xs newnfs in
-                (* Here we don't need to slurp up lots of lambdas, but can make do with one. *)
                 (xs, check status (Ctx.cube_vis ctx x newnfs) body output) in
           Term.Lam (xs, cbody))
   | Lam _, _, _ -> fatal (Checking_lambda_at_nonfunction (PUninst (ctx, uty)))
@@ -168,14 +180,13 @@ let rec check :
       Neu
         { head = Const { name; _ }; alignment = Lawful (Codata { eta = Noeta; ins; fields; _ }); _ },
       Potential _ ) ->
-      let () = is_id_perm (perm_of_ins ins) <|> Comatching_at_degenerated_codata (PConstant name) in
-      check_struct status Noeta ctx tms ty ins fields
+      let () = is_id_ins ins <|> Comatching_at_degenerated_codata (PConstant name) in
+      check_struct status Noeta ctx tms ty (cod_left_ins ins) fields
   | ( Struct (Eta, tms),
       Neu { head = Const { name; _ }; alignment = Lawful (Codata { eta = Eta; ins; fields; _ }); _ },
       _ ) ->
-      let () =
-        is_id_perm (perm_of_ins ins) <|> Checking_tuple_at_degenerated_record (PConstant name) in
-      check_struct status Eta ctx tms ty ins fields
+      is_id_ins ins <|> Checking_tuple_at_degenerated_record (PConstant name);
+      check_struct status Eta ctx tms ty (cod_left_ins ins) fields
   | Struct (Noeta, _), _, _ -> fatal (Comatching_at_noncodata (PUninst (ctx, uty)))
   | Struct (Eta, _), _, _ -> fatal (Checking_tuple_at_nonrecord (PUninst (ctx, uty)))
   | ( Constr ({ value = constr; loc = constr_loc }, args),
@@ -195,7 +206,7 @@ let rec check :
             with_loc constr_loc @@ fun () ->
             fatal (No_such_constructor (`Data (PConstant name), constr)) in
       (* To typecheck a higher-dimensional instance of our constructor constr at the datatype, all the instantiation arguments must also be applications of lower-dimensional versions of that same constructor.  We check this, and extract the arguments of those lower-dimensional constructors as a tube of lists. *)
-      match compare (TubeOf.inst tyargs) dim with
+      match D.compare (TubeOf.inst tyargs) dim with
       | Neq -> fatal (Dimension_mismatch ("checking constr", dim_env env, dim))
       | Eq -> (
           let tyarg_args =
@@ -209,7 +220,7 @@ let rec check :
                           fatal (Missing_instantiation_constructor (constr, `Constr tmname))
                         else
                           (* Assuming the instantiation is well-typed, we must have n = dom_tface fa.  I'd like to check that, but for some reason, matching this compare against Eq claims that the type variable n would escape its scope. *)
-                          let _ = compare n (dom_tface fa) in
+                          let _ = D.compare n (dom_tface fa) in
                           Bwd.fold_right (fun a args -> CubeOf.find_top a :: args) tmargs []
                     | _ ->
                         fatal
@@ -266,7 +277,7 @@ let rec check :
                 args = varty_args;
                 alignment = Lawful (Data { dim; indices; missing = Zero; constrs });
               } -> (
-              match compare dim (TubeOf.inst inst_args) with
+              match D.compare dim (TubeOf.inst inst_args) with
               | Neq -> fatal (Dimension_mismatch ("match", dim, TubeOf.inst inst_args))
               | Eq ->
                   (* In our simple version of pattern-matching, the "indices" and all their boundaries must be distinct free variables with no degeneracies, so that in the branch for each constructor they can be set equal to the computed value of that index for that constructor (and in which they cannot occur).  This is a special case of the unification algorithm described in CDP "Pattern-matching without K" where the only allowed rule is "Solution".  Later we can try to enhance it with their full unification algorithm, at least for non-higher datatypes.  In addition, for a higher-dimensional match, the instantiation arguments must also all be distinct variables, distinct from the indices. *)
@@ -351,7 +362,7 @@ let rec check :
                                              (Bwd.fold_left
                                                 (fun f -> function
                                                   | Value.App (Arg arg, _) -> (
-                                                      match compare (CubeOf.dim arg) dim with
+                                                      match D.compare (CubeOf.dim arg) dim with
                                                       | Eq ->
                                                           apply_term f
                                                             (val_of_norm_cube
@@ -383,7 +394,7 @@ let rec check :
                             | Neu { alignment = Lawful (Data { dim = constrdim; indices; _ }); _ }
                               -> (
                                 match
-                                  ( compare constrdim dim,
+                                  ( D.compare constrdim dim,
                                     N.compare (Bwv.length index_vars) (Bwv.length indices) )
                                 with
                                 | Eq, Eq -> (
@@ -524,7 +535,7 @@ let rec check :
         ty
   | Empty_co_match, _, _ -> check status ctx { value = Struct (Noeta, Abwd.empty); loc = tm.loc } ty
   | Codata (eta, cube, fields), UU m, Potential _ -> (
-      match compare (TubeOf.inst tyargs) m with
+      match D.compare (TubeOf.inst tyargs) m with
       | Neq -> fatal (Dimension_mismatch ("checking codata", TubeOf.inst tyargs, m))
       | Eq -> check_codata status ctx eta tyargs Emp cube (Bwd.to_list fields))
   | Codata _, _, Potential _ ->
@@ -547,9 +558,13 @@ and check_data :
  fun status ctx ty num_indices checked_constrs raw_constrs ->
   match (raw_constrs, status) with
   | [], _ -> Canonical (Data (num_indices, checked_constrs))
-  | (c, { value = Dataconstr (args, output); loc }) :: raw_constrs, Potential (head, current_apps, _)
-    -> (
+  | ( (c, { value = Dataconstr (args, output); loc }) :: raw_constrs,
+      Potential (head, current_apps, hyp) ) -> (
       with_loc loc @@ fun () ->
+      (* Temporarily bind the current constant to the up-until-now value. *)
+      Global.run_with_definition head
+        (Defined (hyp (Term.Canonical (Data (num_indices, checked_constrs)))))
+      @@ fun () ->
       match (Constr.Map.find_opt c checked_constrs, output) with
       | Some _, _ -> fatal (Duplicate_constructor_in_data c)
       | None, Some output -> (
@@ -602,7 +617,7 @@ and get_indices :
           | Value.App (Arg arg, ins) -> (
               match is_id_ins ins with
               | Some () -> (
-                  match compare (CubeOf.dim arg) D.zero with
+                  match D.compare (CubeOf.dim arg) D.zero with
                   | Eq -> readback_nf ctx (CubeOf.find_top arg)
                   | Neq -> fatal (Invalid_constructor_type c))
               | None -> fatal (Invalid_constructor_type c))
@@ -652,24 +667,15 @@ and check_codata :
           let cty = check Kinetic newctx rty (universe D.zero) in
           let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
           check_codata status ctx eta tyargs checked_fields cube raw_fields
-      | Normal ({ value = ac; loc }, xs) -> (
-          let (Faces faces) = count_faces dim in
-          match N.compare (faces_out faces) (N.plus_right ac) with
-          | Eq ->
-              let newctx =
-                Ctx.vis ctx D.zero (D.zero_plus dim) faces ac
-                  (vars_of_list dim (Bwv.to_list xs))
-                  domvars in
-              let cty = check Kinetic newctx rty (universe D.zero) in
-              let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
-              check_codata status ctx eta tyargs checked_fields cube raw_fields
-          | Lt _ | Gt _ ->
-              fatal ?loc
-                (Wrong_boundary_of_record (N.to_int (N.plus_right ac) - N.to_int (faces_out faces)))
-          ))
+      | Normal ({ value = abc; loc }, xs) ->
+          let (Vars (ab, names)) = vars_of_vec loc dim abc xs in
+          let newctx = Ctx.vis ctx D.zero (D.zero_plus dim) ab names domvars in
+          let cty = check Kinetic newctx rty (universe D.zero) in
+          let checked_fields = Snoc (checked_fields, Codatafield {name = fld; ty= cty}) in
+          check_codata status ctx eta tyargs checked_fields cube raw_fields)
 
 and check_struct :
-    type a b c mn m n s.
+    type a b c s m n.
     (b, s) status ->
     s eta ->
     (a, b) Ctx.t ->
@@ -678,8 +684,7 @@ and check_struct :
     (mn, m, n) insertion ->
     (c, n) codatafield Bwd.t ->
     (b, s) term =
- fun status eta ctx tms ty ins fields ->
-  let dim = cod_left_ins ins in
+ fun status eta ctx tms ty dim fields ->
   (* The type of each record field, at which we check the corresponding field supplied in the struct, is the type associated to that field name in general, evaluated at the supplied parameters and at "the term itself".  We don't have the whole term available while typechecking, of course, but we can build a version of it that contains all the previously typechecked fields, which is all we need for a well-typed record.  So we iterate through the fields (in the order specified in the *type*, since that determines the dependencies) while also accumulating the previously typechecked and evaluated fields.  At the end, we throw away the evaluated fields (although as usual, that seems wasteful). *)
   let tms, ctms =
     check_fields status eta ctx ty dim
@@ -690,6 +695,7 @@ and check_struct :
   (* We had to typecheck the fields in the order given in the record type, since later ones might depend on earlier ones.  But then we re-order them back to the order given in the struct, to match what the user wrote. *)
   Term.Struct
     ( eta,
+      dim,
       Bwd.map
         (function
           | `Checked fld, _ -> (
@@ -700,7 +706,7 @@ and check_struct :
         tms )
 
 and check_fields :
-    type a b n s.
+    type a b s n.
     (b, s) status ->
     s eta ->
     (a, b) Ctx.t ->
@@ -713,19 +719,21 @@ and check_fields :
     ([ `Raw of Field.raw option | `Checked of Field.checked ], a check located) Abwd.t
     * (b, s) Term.structfield Bwd.t =
  fun status eta ctx ty dim fields tms etms ctms ->
+  (* The insertion on a struct being checked is the identity, but it stores the substitution dimension of the type being checked against.  If this is a higher-dimensional record (e.g. Gel), there could be a nontrivial right dimension being trivially inserted, but that will get added automatically by an appropriate symmetry action if it happens. *)
   let str = Value.Struct (etms, ins_zero dim) in
   match (fields, status) with
   | [], _ -> (tms, ctms)
   | fld :: fields, Potential (name, args, hyp) ->
       (* Temporarily bind the current constant to the up-until-now value. *)
-      Global.run_with_definition name (Defined (hyp (Term.Struct (eta, ctms)))) @@ fun () ->
-      let head = Value.Const { name; ins = ins_zero dim } in
+      Global.run_with_definition name (Defined (hyp (Term.Struct (eta, dim, ctms)))) @@ fun () ->
+      (* The insertion on the *constant* being checked, by contrast, is always zero, since the constant is not nontrivially substituted at all yet. *)
+      let head = Value.Const { name; ins = ins_zero D.zero } in
       let prev_etm = Uninst (Neu { head; args; alignment = Chaotic str }, Lazy.from_val ty) in
       check_field status eta ctx ty dim fld fields prev_etm tms etms ctms
   | fld :: fields, Kinetic -> check_field status eta ctx ty dim fld fields str tms etms ctms
 
 and check_field :
-    type a b n s.
+    type a b s n.
     (b, s) status ->
     s eta ->
     (a, b) Ctx.t ->
@@ -754,10 +762,8 @@ and check_field :
     | Potential (c, args, hyp) ->
         Potential
           ( c,
-            args,
-            fun value ->
-              hyp (Term.Struct (eta, Snoc (ctms, Structfield { name = fld; value; labeled }))) )
-  in
+            Snoc (args, App (Field fld, ins_zero D.zero)),
+            fun value -> hyp (Term.Struct (eta, dim, Snoc (ctms, Structfield { name = fld; value; labeled }))) ) in
   let ety = tyof_field prev_etm ty fld in
   match
     Abwd.find_opt_and_update_key
@@ -796,7 +802,7 @@ and synth : type a b. (a, b) Ctx.t -> a synth located -> (b, kinetic) term * kin
       let _, x, v = Ctx.lookup ctx i in
       (Term.Var v, x.ty)
   | Const name ->
-      let ty = Global.find_type_opt name <|> Undefined_constant (PConstant name) in
+      let ty, _ = Global.find_opt name <|> Undefined_constant (PConstant name) in
       (Const name, eval_term (Emp D.zero) ty)
   | Field (tm, fld) ->
       let stm, sty = synth ctx tm in
@@ -817,7 +823,9 @@ and synth : type a b. (a, b) Ctx.t -> a synth located -> (b, kinetic) term * kin
       let sfn, sty = synth ctx fn in
       synth_apps ctx { value = sfn; loc = fn.loc } sty locs args
   | Act (str, fa, x) ->
-      let sx, ety = synth ctx x in
+      let sx, ety =
+        if locking fa then Global.run_locked (fun () -> synth (Ctx.lock ctx) x) else synth ctx x
+      in
       let ex = Ctx.eval_term ctx sx in
       ( Act (sx, fa),
         with_loc x.loc @@ fun () ->
@@ -870,7 +878,7 @@ and synth_app :
   (* The obvious thing we can "apply" is an element of a pi-type. *)
   | Pi (_, doms, cods) -> (
       (* Ensure that the pi-type is (fully) instantiated at the right dimension. *)
-      match compare (TubeOf.inst tyargs) (CubeOf.dim doms) with
+      match D.compare (TubeOf.inst tyargs) (CubeOf.dim doms) with
       | Neq -> fatal (Dimension_mismatch ("applying function", TubeOf.inst tyargs, CubeOf.dim doms))
       | Eq ->
           (* Pick up the right number of arguments for the dimension, leaving the others for a later call to synth_app.  Then check each argument against the corresponding type in "doms", instantiated at the appropriate evaluated previous arguments, and evaluate it, producing Cubes of checked terms and values.  Since each argument has to be checked against a type instantiated at the *values* of the previous ones, we also store those in a hashtable as we go. *)
@@ -912,7 +920,7 @@ and synth_app :
   (* We can also "apply" a higher-dimensional *type*, leading to a (further) instantiation of it.  Here the number of arguments must exactly match *some* integral instantiation. *)
   | UU n -> (
       (* Ensure that the universe is (fully) instantiated at the right dimension. *)
-      match compare (TubeOf.inst tyargs) n with
+      match D.compare (TubeOf.inst tyargs) n with
       | Neq -> fatal (Dimension_mismatch ("instantiating type", TubeOf.inst tyargs, n))
       | Eq -> (
           match D.compare_zero n with

@@ -22,14 +22,12 @@ and readback_at : type a z. (z, a) Ctx.t -> kinetic value -> kinetic value -> (a
   | Pi (_, doms, cods), Lam ((Variables (m, mn, xs) as x), body) -> (
       let k = CubeOf.dim doms in
       let l = dim_binder body in
-      match (compare (TubeOf.inst tyargs) k, compare k l) with
+      match (D.compare (TubeOf.inst tyargs) k, D.compare k l) with
       | Neq, _ | _, Neq -> fatal (Dimension_mismatch ("reading back at pi", TubeOf.inst tyargs, k))
       | Eq, Eq ->
           let args, newnfs = dom_vars (Ctx.length ctx) doms in
-          let (Faces dom_faces) = count_faces (D.plus_right mn) in
-          let f = faces_out dom_faces in
-          let (Plus af) = N.plus f in
-          let newctx = Ctx.vis ctx m mn dom_faces af xs newnfs in
+          let (Plus af) = N.plus (NICubeOf.out N.zero xs) in
+          let newctx = Ctx.vis ctx m mn af xs newnfs in
           let output = tyof_app cods tyargs args in
           let body = readback_at newctx (apply_term tm args) output in
           Term.Lam (x, body))
@@ -45,14 +43,12 @@ and readback_at : type a z. (z, a) Ctx.t -> kinetic value -> kinetic value -> (a
                 labeled = f.labeled;
               })
           tmflds in
-      Act (Struct (Eta, fields), perm_of_ins tmins)
+      Act (Struct (Eta, cod_left_ins tmins, fields), perm_of_ins tmins)
   | ( Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ },
       Constr (xconstr, xn, xargs) ) -> (
       let (Dataconstr { env; args = argtys; indices = _ }) =
-        match Constr.Map.find_opt xconstr constrs with
-        | Some x -> x
-        | None -> fatal (Anomaly "constr not found in readback") in
-      match (compare xn (TubeOf.inst tyargs), compare (TubeOf.inst tyargs) (dim_env env)) with
+        Constr.Map.find_opt xconstr constrs <|> Anomaly "constr not found in readback" in
+      match (D.compare xn (TubeOf.inst tyargs), D.compare (TubeOf.inst tyargs) (dim_env env)) with
       | Neq, _ -> fatal (Dimension_mismatch ("reading back constrs", xn, TubeOf.inst tyargs))
       | _, Neq ->
           fatal (Dimension_mismatch ("reading back constrs", TubeOf.inst tyargs, dim_env env))
@@ -124,10 +120,9 @@ and readback_uninst : type a z. (z, a) Ctx.t -> uninst -> (a, kinetic) term =
 and readback_head : type a k z h. (z, a) Ctx.t -> h head -> (a, kinetic) term =
  fun ctx h ->
   match h with
-  | Var { level; deg } -> (
-      match Ctx.find_level ctx level with
-      | Some x -> Act (Var x, deg)
-      | None -> fatal (No_such_level (PLevel level)))
+  | Var { level; deg } ->
+      let x = Ctx.find_level ctx level <|> No_such_level (PLevel level) in
+      Act (Var x, deg)
   | Const { name; ins } ->
       let dim = cod_left_ins ins in
       let perm = deg_of_ins ins (plus_of_ins ins) in

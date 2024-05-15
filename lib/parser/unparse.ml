@@ -164,9 +164,15 @@ let rec get_spine :
  fun tm ->
   match tm with
   | App (fn, arg) -> (
+      let module M = CubeOf.Monadic (Monad.State (struct
+        type t = (n, kinetic) term Bwd.t
+      end)) in
+      (* To append the entries in a cube to a Bwd, we iterate through it with a Bwd state. *)
+      let append_bwd args =
+        snd (M.miterM { it = (fun _ [ x ] s -> ((), Snoc (s, x))) } [ arg ] args) in
       match get_spine fn with
-      | `App (head, args) -> `App (head, CubeOf.append_bwd args arg)
-      | `Field (head, fld, args) -> `Field (head, fld, CubeOf.append_bwd args arg))
+      | `App (head, args) -> `App (head, append_bwd args)
+      | `Field (head, fld, args) -> `Field (head, fld, append_bwd args))
   | Field (head, fld) -> `Field (head, fld, Emp)
   (* We have to look through identity degeneracies here. *)
   | Act (body, s) -> (
@@ -227,11 +233,11 @@ let rec unparse :
                   ~last:body ~right_ok)))
   | Lam (Variables (m, _, _), _) ->
       let cube =
-        match compare m D.zero with
+        match D.compare m D.zero with
         | Eq -> `Normal
         | Neq -> `Cube in
       unparse_lam cube vars Emp tm li ri
-  | Struct (Eta, fields) ->
+  | Struct (Eta, _, fields) ->
       unlocated
         (outfix ~notn:parens ~ws:[]
            ~inner:
@@ -379,15 +385,22 @@ and unparse_lam :
     (lt, ls, rt, rs) parse located =
  fun cube vars xs body li ri ->
   match body with
-  | Lam (Variables (m, m_n, boundvars), inner) -> (
-      match (cube, compare m D.zero) with
-      | `Normal, Eq ->
-          let Eq = D.plus_uniq m_n (D.zero_plus (D.plus_right m_n)) in
-          let x, vars = Names.add_normals vars boundvars in
-          unparse_lam cube vars (CubeOf.append_bwd xs x) inner li ri
-      | `Cube, Neq ->
-          let x, vars = Names.add_cube (D.plus_out m m_n) vars (CubeOf.find_top boundvars) in
-          unparse_lam cube vars (Snoc (xs, x)) inner li ri
+  | Lam ((Variables (m, _, _) as boundvars), inner) -> (
+      match (cube, D.compare m D.zero) with
+      | `Normal, Eq | `Cube, Neq ->
+          let Variables (_, _, x), vars = Names.add vars boundvars in
+          let module Fold = NICubeOf.Traverse (struct
+            type 'acc t = string option Bwd.t
+          end) in
+          (* Apparently we need to define the folding function explicitly with a type to make it come out sufficiently polymorphic. *)
+          let folder :
+              type m left right.
+              string option Bwd.t -> (left, m, string option, right) NFamOf.t -> string option Bwd.t
+              =
+           fun acc (NFamOf x) -> Snoc (acc, x) in
+          unparse_lam cube vars
+            (Fold.fold_left { fold = (fun _ acc x -> folder acc x) } xs x)
+            inner li ri
       | _ -> unparse_lam_done cube vars xs body li ri)
   | _ -> unparse_lam_done cube vars xs body li ri
 
@@ -436,9 +449,7 @@ and unparse_act :
   | None -> (
       match name_of_deg s with
       | Some str -> unparse_spine vars (`Degen str) (Snoc (Emp, tm)) li ri
-      | None ->
-          unlocated
-            (Superscript (Some (tm.unparse li Interval.empty), "(" ^ string_of_deg s ^ ")", [])))
+      | None -> unlocated (Superscript (Some (tm.unparse li Interval.empty), string_of_deg s, [])))
 
 (* We group together all the 0-dimensional dependent pi-types in a notation, so we recursively descend through the term picking those up until we find a non-pi-type, a higher-dimensional pi-type, or a non-dependent pi-type, in which case we pass it off to unparse_pis_final. *)
 and unparse_pis :
@@ -452,9 +463,9 @@ and unparse_pis :
  fun vars accum tm li ri ->
   match tm with
   | Pi (x, doms, cods) -> (
-      match (x, compare (CubeOf.dim doms) D.zero) with
+      match (x, D.compare (CubeOf.dim doms) D.zero) with
       | Some x, Eq ->
-          let x, newvars = Names.add_normals vars (CubeOf.singleton (Some x)) in
+          let Variables (_, _, x), newvars = Names.add vars (singleton_variables D.zero (Some x)) in
           unparse_pis newvars
             (Snoc
                ( accum,
@@ -462,12 +473,12 @@ and unparse_pis :
                    unparse =
                      (fun _ _ ->
                        unparse_pi_dom
-                         (Option.get (CubeOf.find_top x))
+                         (Option.get (NICubeOf.find_top x))
                          (unparse vars (CubeOf.find_top doms) (interval_right asc) Interval.entire));
                  } ))
             (CodCube.find_top cods) li ri
       | None, Eq ->
-          let _, newvars = Names.add_normals vars (CubeOf.singleton None) in
+          let _, newvars = Names.add vars (singleton_variables D.zero None) in
           unparse_pis_final vars accum
             {
               unparse =
@@ -573,7 +584,6 @@ let () =
               Term
                 (unparse (Ctx.names ctx) (Readback.readback_uninst ctx tm) Interval.entire
                    Interval.entire) )
-      | PNames vars -> Printed (Core.Names.pp_names, vars)
       | PConstant name ->
           Printed
             ((fun ppf x -> Uuseg_string.pp_utf_8 ppf (String.concat "." x)), Scope.name_of name)

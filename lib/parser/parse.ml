@@ -17,7 +17,7 @@ module SemanticError = struct
   type t =
     (* These strings are the names of notations.  Arguably we should display their *namespaced* names, which would mean calling out to Yuujinchou.  It would also mean some special-casing, because applications are implemented specially in the parser and not as an actual Notation. *)
     | No_relative_precedence of Asai.Range.t * string * string
-    | Empty_degeneracy of Position.range
+    | Invalid_degeneracy of Position.range * string
 end
 
 (* The functor that defines all the term-parsing combinators. *)
@@ -179,8 +179,9 @@ module Combinators (Final : Fmlib_std.Interfaces.ANY) = struct
          located
            (step (fun state rng (tok, ws) ->
                 match tok with
-                | Superscript "" -> Some (Error (SemanticError.Empty_degeneracy rng), state)
                 | Superscript s -> Some (Ok (s, ws), state)
+                | Invalid_superscript s ->
+                    Some (Error (SemanticError.Invalid_degeneracy (rng, s)), state)
                 | _ -> None)) in
        match res with
        | Ok (s, ws) -> return (loc, s, ws)
@@ -406,7 +407,7 @@ module Combinators (Final : Fmlib_std.Interfaces.ANY) = struct
     else if has_failed_semantic p then
       match failed_semantic p with
       | No_relative_precedence (loc, n1, n2) -> fatal ~loc (No_relative_precedence (n1, n2))
-      | Empty_degeneracy rng -> fatal ~loc:(Range.convert rng) (Invalid_degeneracy "")
+      | Invalid_degeneracy (rng, str) -> fatal ~loc:(Range.convert rng) (Invalid_degeneracy str)
     else if has_succeeded p then p
     else if needs_more p then fatal (Anomaly "parser needs more")
     else fatal (Anomaly "what")
@@ -479,15 +480,26 @@ module Parse_command = struct
     let* ty = C.term [] in
     return (Command.Axiom { wsaxiom; name; wsname; parameters; wscolon; ty })
 
-  let def =
-    let* wsdef = token Def in
+  let def tok =
+    let* wsdef = token tok in
     let* name, wsname = ident in
     let* parameters = zero_or_more parameter in
-    let* wscolon = token Colon in
-    let* ty = C.term [ Coloneq ] in
-    let* wscoloneq = token Coloneq in
-    let* tm = C.term [] in
-    return (Command.Def { wsdef; name; wsname; parameters; wscolon; ty; wscoloneq; tm })
+    let* wscolon, ty, wscoloneq, tm =
+      (let* wscolon = token Colon in
+       let* ty = C.term [ Coloneq ] in
+       let* wscoloneq = token Coloneq in
+       let* tm = C.term [] in
+       return (wscolon, Some ty, wscoloneq, tm))
+      </>
+      let* wscoloneq = token Coloneq in
+      let* tm = C.term [] in
+      return ([], None, wscoloneq, tm) in
+    return ({ wsdef; name; wsname; parameters; wscolon; ty; wscoloneq; tm } : Command.def)
+
+  let def_and =
+    let* first = def Def in
+    let* rest = zero_or_more (def And) in
+    return (Command.Def (first :: rest))
 
   let echo =
     let* wsecho = token Echo in
@@ -496,13 +508,14 @@ module Parse_command = struct
 
   let tightness_and_name :
       (No.wrapped option * Whitespace.t list * Scope.Trie.path * Whitespace.t list) t =
-    let* tight_or_name = ident in
+    let* tloc, tight_or_name = located ident in
     (let* name, wsname = ident in
      let tight, wstight = tight_or_name in
      let tight = String.concat "." tight in
      match No.of_rat (Q.of_string tight) with
      | Some tight -> return (Some tight, wstight, name, wsname)
-     | None -> fatal (Invalid_tightness tight))
+     | None | (exception Invalid_argument _) ->
+         fatal ~loc:(Range.convert tloc) (Invalid_tightness tight))
     </>
     let name, wsname = tight_or_name in
     return (None, [], name, wsname)
@@ -592,7 +605,7 @@ module Parse_command = struct
     return Command.Eof
 
   let command : unit -> Command.t C.Basic.t =
-   fun () -> bof </> axiom </> def </> echo </> notation </> eof
+   fun () -> bof </> axiom </> def_and </> echo </> notation </> eof
 
   let command_or_echo : unit -> Command.t C.Basic.t =
    fun () ->
@@ -641,13 +654,16 @@ module Parse_command = struct
   let has_consumed_end p = C.Lex_and_parse.has_consumed_end p
 end
 
-let parse_and_execute_command (content : string) : unit =
+let parse_single_command (content : string) : Whitespace.t list * Command.t option =
   let src : Asai.Range.source = `String { content; title = Some "interactive input" } in
   let p, src = Parse_command.start_parse ~or_echo:true src in
-  let _bof = Parse_command.final p in
-  let p, src = Parse_command.restart_parse ~or_echo:true p src in
-  let cmd = Parse_command.final p in
-  if cmd <> Eof then
-    let p, _ = Parse_command.restart_parse ~or_echo:true p src in
-    let eof = Parse_command.final p in
-    if eof = Eof then Command.execute cmd else Core.Reporter.fatal Too_many_commands
+  match Parse_command.final p with
+  | Bof ws ->
+      let p, src = Parse_command.restart_parse ~or_echo:true p src in
+      let cmd = Parse_command.final p in
+      if cmd <> Eof then
+        let p, _ = Parse_command.restart_parse ~or_echo:true p src in
+        let eof = Parse_command.final p in
+        if eof = Eof then (ws, Some cmd) else Core.Reporter.fatal Too_many_commands
+      else (ws, None)
+  | _ -> Core.Reporter.fatal (Anomaly "interactive parse doesn't start with Bof")

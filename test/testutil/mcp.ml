@@ -5,6 +5,10 @@ open Value
 open Parse
 open Asai.Range
 
+let () =
+  Dim.Endpoints.set_len 2;
+  Dim.Endpoints.set_internal true
+
 (* The current context of assumptions, including names. *)
 type ctx = Ctx : ('n, 'b) Ctx.t * 'n Varscope.t -> ctx
 

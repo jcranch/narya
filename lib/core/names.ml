@@ -27,7 +27,7 @@ let lookup : type n. n t -> n index -> string list =
     | Snoc (ctx, _), Index (Later x, fa) -> lookup ctx (Index (x, fa))
     | Snoc (_, Variables (_, mn, xs)), Index (Now, fa) -> (
         let (SFace_of_plus (_, fb, fc)) = sface_of_plus mn fa in
-        match CubeOf.find xs fc with
+        match NICubeOf.find xs fc with
         | Some x -> cubevar x fb
         | None -> fatal (Anomaly "reference to anonymous variable")) in
   lookup ctx x
@@ -52,57 +52,33 @@ let uniquify : string option -> int StringMap.t -> string option * int StringMap
           (Some namen, used |> StringMap.add namen 0 |> StringMap.add name (n + 1)))
 
 (* Do the same thing to a whole cube of variable names. *)
-let uniquifies :
-    type n.
-    (n, string option) CubeOf.t -> int StringMap.t -> (n, string option) CubeOf.t * int StringMap.t
-    =
+let uniquify_cube :
+    type n left right.
+    (left, n, string option, right) NICubeOf.t ->
+    int StringMap.t ->
+    (left, n, string option, right) NICubeOf.t * int StringMap.t =
  fun names used ->
-  let module M = Monad.State (struct
+  (* Apparently we need to define the iteration function with an explicit type so that it ends up sufficiently polymorphic. *)
+  let uniquify_nfamof :
+      type m left right.
+      (left, m, string option, right) NFamOf.t ->
+      int StringMap.t ->
+      (left, m, string option, right) NFamOf.t * int StringMap.t =
+   fun (NFamOf name) used ->
+    let name, used = uniquify name used in
+    (NFamOf name, used) in
+  let open NICubeOf.Applicatic (Applicative.OfMonad (Monad.State (struct
     type t = int StringMap.t
-  end) in
-  let open CubeOf.Monadic (M) in
-  mmapM { map = (fun _ [ name ] used -> uniquify name used) } [ names ] used
+  end))) in
+  mapM { map = (fun _ name used -> uniquify_nfamof name used) } names used
 
 let add_cube : type n b. n D.t -> b t -> string option -> string option * (b, n) snoc t =
  fun n { ctx; used } name ->
   let name, used = uniquify name used in
-  (name, { ctx = Snoc (ctx, Variables (n, D.plus_zero n, CubeOf.singleton name)); used })
-
-let add_normals :
-    type n b. b t -> (n, string option) CubeOf.t -> (n, string option) CubeOf.t * (b, n) snoc t =
- fun { ctx; used } names ->
-  let names, used = uniquifies names used in
-  let n = CubeOf.dim names in
-  (names, { ctx = Snoc (ctx, Variables (D.zero, D.zero_plus n, names)); used })
+  (name, { ctx = Snoc (ctx, Variables (n, D.plus_zero n, NICubeOf.singleton name)); used })
 
 let add : 'b t -> 'n variables -> 'n variables * ('b, 'n) snoc t =
  fun { ctx; used } (Variables (m, mn, names)) ->
-  let names, used = uniquifies names used in
+  let names, used = uniquify_cube names used in
   let vars = Variables (m, mn, names) in
   (vars, { ctx = Snoc (ctx, vars); used })
-
-let pp_variables : type n. Format.formatter -> n variables -> unit =
- fun ppf (Variables (_, _, x)) ->
-  let open Format in
-  fprintf ppf "@[<hv 2>(";
-  CubeOf.miter
-    {
-      it =
-        (fun fa [ x ] ->
-          if Option.is_some (is_id_sface fa) then pp_print_string ppf (Option.value x ~default:"_")
-          else fprintf ppf "%s,@ " (Option.value x ~default:"_"));
-    }
-    [ x ];
-  fprintf ppf ")@]"
-
-let pp_names : type b. Format.formatter -> b t -> unit =
- fun ppf vars ->
-  let open Format in
-  let rec pp : type b. bool -> formatter -> b ctx -> unit =
-   fun comma ppf vars ->
-    match vars with
-    | Emp -> ()
-    | Snoc (vars, x) ->
-        fprintf ppf "%a%a" (pp true) vars pp_variables x;
-        if comma then fprintf ppf ",@ " in
-  fprintf ppf "@[<hv 2>(%a)@]" (pp false) vars.ctx

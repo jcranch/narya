@@ -17,7 +17,7 @@ module Anyplus = struct
     Exists (D.plus_out p ab, ab)
 
   let out : type p a b. p param -> a Dom.t -> (p, a, b) t -> b Cod.t = fun p _ pa -> D.plus_out p pa
-  let uniq : type p a b1 b2. (p, a, b1) t -> (p, a, b2) t -> (b1, b2) Monoid.eq = D.plus_uniq
+  let uniq : type p a b1 b2. (p, a, b1) t -> (p, a, b2) t -> (b1, b2) Eq.t = D.plus_uniq
 end
 
 include Tbwd.Map (Anyplus)

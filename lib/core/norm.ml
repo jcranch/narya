@@ -41,11 +41,12 @@ let lookup : type n b. (n, b) env -> b index -> kinetic value =
     (* If we encounter a variable that isn't ours, we skip it and proceed. *)
     | Ext (env, _), Index (Later v, fa) -> lookup env (Index (v, fa)) op
     (* Finally, when we find our variable, we decompose the accumulated operator into a strict face and degeneracy, use the face as an index lookup, and act by the degeneracy. *)
-    | Ext (_, entry), Index (Now, fa) ->
+    | Ext (_, entry), Index (Now, fa) -> (
         let (Op (f, s)) = op in
-        act_value (CubeOf.find (CubeOf.find entry fa) f) s in
-  let n = dim_env env in
-  lookup env v (id_op n)
+        match D.compare (cod_sface fa) (CubeOf.dim entry) with
+        | Eq -> act_value (CubeOf.find (CubeOf.find entry fa) f) s
+        | Neq -> fatal (Dimension_mismatch ("lookup", cod_sface fa, CubeOf.dim entry))) in
+  lookup env v (id_op (dim_env env))
 
 (* The master evaluation function. *)
 let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
@@ -54,10 +55,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
   | Var v -> Val (lookup env v)
   | Const name -> (
       let dim = dim_env env in
-      let cty =
-        match Global.find_type_opt name with
-        | Some cty -> cty
-        | None -> fatal (Undefined_constant (PConstant name)) in
+      let cty, defn = Global.find_opt name <|> Undefined_constant (PConstant name) in
       (* Its type must also be instantiated at the lower-dimensional versions of itself. *)
       let ty =
         lazy
@@ -75,16 +73,15 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                       | _ -> fatal (Anomaly "eval of lower-dim constant not neutral/canonical"));
                 })) in
       let head = Const { name; ins = ins_zero dim } in
-      match Global.find_definition_opt name with
-      | Some (Defined tree) -> (
+      match defn with
+      | Defined tree -> (
           match eval (Emp dim) tree with
           | Realize x -> Val x
           | Val x -> Val (Uninst (Neu { head; args = Emp; alignment = Chaotic x }, ty))
           | Canonical c -> Val (Uninst (Neu { head; args = Emp; alignment = Lawful c }, ty))
           (* Since a top-level case tree is in the empty context, it doesn't have't anything to stuck-match against. *)
           | Unrealized -> fatal (Anomaly "true neutral case tree in empty context"))
-      | Some _ -> Val (Uninst (Neu { head; args = Emp; alignment = True }, ty))
-      | None -> fatal (Undefined_constant (PConstant name)))
+      | Axiom -> Val (Uninst (Neu { head; args = Emp; alignment = True }, ty)))
   | UU n ->
       let m = dim_env env in
       let (Plus mn) = D.plus n in
@@ -102,7 +99,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       let mn_k' = D.plus_out mn' mn_k in
       (* tys is a complete m+n+k tube *)
       let (Inst_tys tys) = inst_tys newtm in
-      match compare (TubeOf.inst tys) mn_k' with
+      match D.compare (TubeOf.inst tys) mn_k' with
       | Neq -> fatal (Dimension_mismatch ("evaluation instantiation", TubeOf.inst tys, mn_k'))
       | Eq ->
           (* used_tys is an m+n+k tube with m+n uninstantiated and k instantiated.  These are the types that we must instantiate to give the types of the added instantiation arguments. *)
@@ -258,7 +255,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                       (Constr.to_string name)))
           | Some (Branch (plus, perm, body)) -> (
               let (Plus mn) = D.plus n in
-              match compare dim (D.plus_out m mn) with
+              match D.compare dim (D.plus_out m mn) with
               | Eq ->
                   (* If we have a branch with a matching constant, then our constructor must be applied to exactly the right number of elements (in dargs).  In that case, we pick them out and add them to the environment. *)
                   let env = take_args env mn dargs plus in
@@ -296,7 +293,7 @@ and apply : type n s. s value -> (n, kinetic value) CubeOf.t -> s evaluation =
   (* If the function is a lambda-abstraction, we check that it has the correct dimension and then beta-reduce, adding the arguments to the environment. *)
   | Lam (_, body) -> (
       let m = CubeOf.dim arg in
-      match compare (dim_binder body) m with
+      match D.compare (dim_binder body) m with
       | Neq -> fatal (Dimension_mismatch ("applying a lambda", dim_binder body, m))
       | Eq -> apply_binder body arg)
   (* If it is a neutral application... *)
@@ -307,7 +304,7 @@ and apply : type n s. s value -> (n, kinetic value) CubeOf.t -> s evaluation =
       | Pi (_, doms, cods) -> (
           (* ... and that the pi-type and its instantiation have the correct dimension. *)
           let k = CubeOf.dim doms in
-          match (compare (TubeOf.inst tyargs) k, compare (CubeOf.dim arg) k) with
+          match (D.compare (TubeOf.inst tyargs) k, D.compare (CubeOf.dim arg) k) with
           | Neq, _ ->
               fatal (Dimension_mismatch ("applying a neutral function", TubeOf.inst tyargs, k))
           | _, Neq ->
@@ -331,7 +328,7 @@ and apply : type n s. s value -> (n, kinetic value) CubeOf.t -> s evaluation =
                       | Unrealized -> Val (Uninst (Neu { head; args; alignment = True }, ty))
                       | Canonical c -> Val (Uninst (Neu { head; args; alignment = Lawful c }, ty)))
                   | Lawful (Data { dim; indices; missing = Suc _ as ij; constrs }) -> (
-                      match compare dim k with
+                      match D.compare dim k with
                       | Neq -> fatal (Dimension_mismatch ("apply", dim, k))
                       | Eq ->
                           let indices, missing = (Bwv.Snoc (indices, newarg), N.suc_plus ij) in
@@ -384,34 +381,40 @@ and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> 
   match tm with
   (* TODO: Is it okay to ignore the insertion here? *)
   | Struct (_, fields, _) ->
-      Bwd.find_map (lower_field fld.name) fields <|> Anomaly "missing field in eval"
+      Bwd.find_map (lower_field fld.name) fields
+      <|> Anomaly ("missing field in eval struct: " ^ Field.string_of_checked fld)
   | Uninst (Neu { head; args; alignment }, (lazy ty)) -> (
       let newty = lazy (tyof_field tm ty fld) in
       let args = Snoc (args, App (Field fld, ins_zero (ambient_pbij fld.pbij))) in
       match alignment with
       | True -> Uninst (Neu { head; args; alignment = True }, newty)
-      | Chaotic (Struct (_, fields, _)) ->
-          Bwd.find_map
-            (function
-              | Higher_structfield f -> (
-                  match Field.equal f.name fld with
-                  | Eq ->
-                      Some
-                        (match f.memo with
-                        | Some x -> aligned_field head args newty x
-                        | None ->
-                            (* TODO: Extract a permutation and a sum from pm, now that unused=0. *)
-                            let e =
-                              eval (Shift (Act (f.env, Sorry.e ()), Sorry.e (), f.degen)) f.value
-                            in
-                            f.memo <- Some e;
-                            aligned_field head args newty e)
-                  | Neq -> None)
-              | Lower_structfield { name; value; _ } ->
-                  if name = fld.name then Some (aligned_field head args newty (Lazy.force value))
-                  else None)
-            fields
-          <|> Anomaly "missing field in eval"
+      | Chaotic (Struct (_, fields, _)) -> (
+          match
+            Bwd.find_map
+              (function
+                | Higher_structfield f -> (
+                    match Field.equal f.name fld with
+                    | Eq ->
+                        Some
+                          (match f.memo with
+                          | Some x -> aligned_field head args newty x
+                          | None ->
+                              (* TODO: Extract a permutation and a sum from pm, now that unused=0. *)
+                              let e =
+                                eval (Shift (Act (f.env, Sorry.e ()), Sorry.e (), f.degen)) f.value
+                              in
+                              f.memo <- Some e;
+                              aligned_field head args newty e)
+                    | Neq -> None)
+                | Lower_structfield { name; value; _ } ->
+                    if name = fld.name then Some (aligned_field head args newty (Lazy.force value))
+                    else None)
+              fields
+          with
+          | None ->
+              (* This can happen correctly during checking a recursive case tree, where the body of one field refers to its not-yet-defined self or other not-yet-defined fields. *)
+              Uninst (Neu { head; args; alignment = True }, newty)
+          | Some x -> x)
       | Chaotic _ -> fatal (Anomaly "field projection of non-struct case tree")
       | Lawful _ -> fatal (Anomaly "field projection of canonical type"))
   | _ -> fatal ~severity:Asai.Diagnostic.Bug (No_such_field (`Other, Checked fld))
@@ -452,11 +455,11 @@ and tyof_field_withname :
       let n = cod_right_ins ins in
       let mn = plus_of_ins ins in
       let mn' = D.plus_out m mn in
-      match compare (TubeOf.inst tyargs) mn' with
+      match D.compare (TubeOf.inst tyargs) mn' with
       | Neq ->
           fatal ?severity (Dimension_mismatch ("computing type of field", TubeOf.inst tyargs, mn'))
       | Eq -> (
-          (* The type of the field projection comes from the type associated to that field name in general, evaluated at the supplied parameters along with the term itself and its boundaries. *)
+          (* The type of the field projection comes from the type associated to that field name in general, evaluated at the stored environment extended by the term itself and its boundaries. *)
           let tyargs' = TubeOf.plus_cube (val_of_norm_tube tyargs) (CubeOf.singleton tm) in
           let entries =
             CubeOf.build n
@@ -559,7 +562,7 @@ and eval_higher_structfield :
         Bwd.find_map
           (function
            | Term.Higher_structfield { name; intrinsic; degen; value } -> (
-               match (Field.equal fldname name, compare (D.pos intr) (D.pos intrinsic)) with
+               match (Field.equal fldname name, D.compare (D.pos intr) (D.pos intrinsic)) with
                | Eq, Eq ->
                    let name = Field.make_checked fld p in
                    Some

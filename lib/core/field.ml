@@ -1,4 +1,6 @@
 open Dim
+open Util
+open Energy
 
 module Raw = struct
   type t = { name : string; pbij : Pbij_strings.t }
@@ -56,7 +58,7 @@ let make_checked :
 
 let equal :
     type x1 kx1 ky1 y1 x2 kx2 ky2 y2.
-    (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> (x1, x2) Util.Monoid.compare =
+    (x1, kx1, ky1, y1) checked -> (x2, kx2, ky2, y2) checked -> (x1, x2) Eq.compare =
  fun _ _ -> Util.Sorry.e ()
 
 let is_equal :
@@ -96,5 +98,5 @@ let check_zero : raw -> check_zero =
   else Uncheck
 
 (* Check that a raw field matches a checked field. TODO *)
-let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Util.Monoid.compare =
+let checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Eq.compare =
  fun _rfld _cfld -> Util.Sorry.e () (* Pbij_strings.is_empty rfld.pbij && rfld.name = cfld.name *)

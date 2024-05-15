@@ -20,6 +20,19 @@ let input_strings = ref Emp
 let use_stdin = ref false
 let interactive = ref false
 let proofgeneral = ref false
+let arity = ref 2
+let refl_char = ref 'e'
+let refl_strings = ref [ "refl"; "Id" ]
+let internal = ref true
+
+let set_refls str =
+  match String.split_on_char ',' str with
+  | [] -> raise (Failure "Empty direction names")
+  | c :: _ when String.length c <> 1 || c.[0] < 'a' || c.[0] > 'z' ->
+      raise (Failure "Direction name must be a single lowercase letter")
+  | c :: names ->
+      refl_char := c.[0];
+      refl_strings := names
 
 let speclist =
   [
@@ -36,8 +49,22 @@ let speclist =
     ("-reformat", Arg.Set reformat, "Display reformatted code on stdout");
     ("-noncompact", Arg.Clear compact, "Reformat code noncompactly (default)");
     ("-compact", Arg.Set compact, "Reformat code compactly");
-    ("-unicode", Arg.Set unicode, "Reformat code using Unicode for built-ins (default)");
-    ("-ascii", Arg.Clear unicode, "Reformat code using ASCII for built-ins");
+    ("-unicode", Arg.Set unicode, "Display and reformat code using Unicode for built-ins (default)");
+    ("-ascii", Arg.Clear unicode, "Display and reformat code using ASCII for built-ins");
+    ("-arity", Arg.Set_int arity, "Arity of parametricity (default = 2)");
+    ( "-direction",
+      Arg.String set_refls,
+      "Names for parametricity direction and reflexivity (default = e,refl,Id)" );
+    ("-internal", Arg.Set internal, "Set parametricity to internal (default)");
+    ("-external", Arg.Clear internal, "Set parametricity to external");
+    ( "-dtt",
+      Unit
+        (fun () ->
+          arity := 1;
+          refl_char := 'd';
+          refl_strings := [];
+          internal := false),
+      "Abbreviation for -arity 1 -direction d -external" );
     ("--help", Arg.Unit (fun () -> ()), "");
     ("-", Arg.Set use_stdin, "");
   ]
@@ -112,7 +139,16 @@ let rec repl terminal history buf =
         Reporter.try_with
           ~emit:(fun d -> Terminal.display ~output:stdout d)
           ~fatal:(fun d -> Terminal.display ~output:stdout d)
-          (fun () -> parse_and_execute_command str);
+          (fun () ->
+            match parse_single_command str with
+            | ws, None -> if !reformat then Print.pp_ws `None std_formatter ws
+            | ws, Some cmd ->
+                if !typecheck then Parser.Command.execute cmd;
+                if !reformat then (
+                  Print.pp_ws `None std_formatter ws;
+                  let last = Parser.Command.pp_command std_formatter cmd in
+                  Print.pp_ws `None std_formatter last;
+                  Format.pp_print_newline std_formatter ()));
         LTerm_history.add history (Zed_string.of_utf8 (String.trim str));
         repl terminal history None)
       else (
@@ -146,7 +182,15 @@ let rec interact_pg () =
     Reporter.try_with
       ~emit:(fun d -> Terminal.display ~output:stdout d)
       ~fatal:(fun d -> Terminal.display ~output:stdout d)
-      (fun () -> parse_and_execute_command str);
+      (fun () ->
+        match parse_single_command str with
+        | ws, None -> if !reformat then Print.pp_ws `None std_formatter ws
+        | ws, Some cmd ->
+            if !typecheck then Parser.Command.execute cmd;
+            if !reformat then (
+              Print.pp_ws `None std_formatter ws;
+              let last = Parser.Command.pp_command std_formatter cmd in
+              Print.pp_ws `None std_formatter last));
     interact_pg ()
   with End_of_file -> ()
 
@@ -170,6 +214,11 @@ let () =
       Terminal.display ~output:stderr d;
       exit 1)
   @@ fun () ->
+  if !arity < 1 || !arity > 9 then Reporter.fatal (Unimplemented "arities outside [1,9]");
+  Dim.Endpoints.set_len !arity;
+  Dim.Endpoints.set_char !refl_char;
+  Dim.Endpoints.set_names !refl_strings;
+  Dim.Endpoints.set_internal !internal;
   (* TODO: If executing multiple files, they should be namespaced as sections.  (And eventually, using bantorra.) *)
   Mbwd.miter (fun [ filename ] -> execute (`File filename)) [ !input_files ];
   (if !use_stdin then

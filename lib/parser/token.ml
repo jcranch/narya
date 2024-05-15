@@ -26,6 +26,7 @@ type t =
   | Internal of string (* Starting or ending with _ *)
   | Axiom
   | Def
+  | And
   | Echo
   | Match
   | Sig
@@ -38,6 +39,7 @@ type t =
   (* Alphanumeric/unicode other than common ASCII symbols and above single-token characters, with dots and underscores occuring only internally, and each dot-separated piece being nonempty.  Those not containing any dots could be local variable names (with one dot, they could be a face of a cube variable), and those consisting entirely of digits could be numerals.  We can't separate these out at lexing time into those that are parts of mixfix notations and those that are potential identifiers, since the mixfix notations in scope change as we go through a file. *)
   | Ident of string list
   | Superscript of string
+  | Invalid_superscript of string
   | Bof
   | Eof
 
@@ -87,16 +89,20 @@ let supers =
     ("ˣ", 0x2e3, 'x');
     ("ʸ", 0x2b8, 'y');
     ("ᶻ", 0x1dbb, 'z');
-    ("⁽", 0x207d, '(');
-    ("⁾", 0x207e, ')');
-    ("⁺", 0x207a, '+');
     ("⁻", 0x207b, '-');
-    ("⁼", 0x207c, '=');
+    (* ("⁽", 0x207d, '('); *)
+    (* ("⁾", 0x207e, ')'); *)
+    (* ("⁺", 0x207a, '+'); *)
+    (* ("⁼", 0x207c, '='); *)
   |]
 
 let super_strings = Array.map (fun (x, _, _) -> x) supers
 let super_uchars = Array.map (fun (_, c, _) -> Uchar.of_int c) supers
 let unsupers = Array.map (fun (_, _, s) -> s) supers
+let super_lparen_uchar = Uchar.of_int 0x207d
+let super_rparen_uchar = Uchar.of_int 0x207e
+let super_lparen_string = "⁽"
+let super_rparen_string = "⁾"
 
 (* Convert a string of ASCII characters to a corresponding Unicode superscript. *)
 let to_super (s : string) : string =
@@ -149,6 +155,7 @@ let to_string = function
   | Internal s -> s
   | Axiom -> "axiom"
   | Def -> "def"
+  | And -> "and"
   | Echo -> "echo"
   | Match -> "match"
   | Sig -> "sig"
@@ -160,6 +167,7 @@ let to_string = function
   | Op s -> s
   | Ident s -> String.concat "." s
   | Superscript s -> to_super s
+  | Invalid_superscript s -> to_super s
   | Bof -> "BOF"
   | Eof -> "EOF"
 

@@ -69,10 +69,11 @@ let of_list : type a mn. mn N.t -> a list -> ((a, mn) t * a list) option =
   of_list (N.zero_plus n) Emp ys
 
 (* Find the rightmost occurrence of an element in a vector, if any, and return its De Bruijn index. *)
-let rec find : type a n. a -> (a, n) t -> n N.index option =
- fun y -> function
+let rec find_opt : type a n. (a -> bool) -> (a, n) t -> (a * n N.index) option =
+ fun test -> function
   | Emp -> None
-  | Snoc (xs, x) -> if x = y then Some Top else Option.map (fun z -> N.Pop z) (find y xs)
+  | Snoc (xs, x) ->
+      if test x then Some (x, Top) else Option.map (fun (y, z) -> (y, N.Pop z)) (find_opt test xs)
 
 (* Find the rightmost occurrence of an element and return its De Bruijn index, along with the vector with that element removed. *)
 let rec find_remove : type a n. a -> (a, n N.suc) t -> ((a, n) t * n N.suc N.index) option =
@@ -97,6 +98,15 @@ let rec insert : type a n. n N.suc N.index -> a -> (a, n) t -> (a, n N.suc) t =
           match i with
           | _ -> .)
       | Snoc (xs, y) -> Snoc (insert i x xs, y))
+
+(* Apply a permutation *)
+let rec permute : type a m n. (a, m) t -> (m, n) N.perm -> (a, n) t =
+ fun xs p ->
+  match (xs, p) with
+  | _, Id -> xs
+  | Snoc (xs, x), Insert (p, i) ->
+      let ys = permute xs p in
+      insert i x ys
 
 (* Fill a new vector with the return values of a function. *)
 let rec init : type a n. n N.t -> (n N.index -> a) -> (a, n) t =
@@ -138,10 +148,10 @@ module Heter = struct
     | x :: xs -> head' x :: head xs
 end
 
-(* Now we can define the general monadic heterogeneous traversal. *)
+(* Now we can define the general heterogeneous traversal. *)
 
-module Monadic (M : Monad.Plain) = struct
-  open Monad.Ops (M)
+module Applicatic (M : Applicative.Plain) = struct
+  open Applicative.Ops (M)
 
   let rec pmapM :
       type x xs ys n.
@@ -153,33 +163,32 @@ module Monadic (M : Monad.Plain) = struct
     match xss with
     | Emp :: _ -> return (Heter.emp ys)
     | Snoc (xs, x) :: xss ->
-        let* fxs = pmapM f (xs :: Heter.head xss) ys in
-        let* fx = f (x :: Heter.tail xss) in
-        return (Heter.snoc fxs fx)
+        let+ fxs = pmapM f (xs :: Heter.head xss) ys and+ fx = f (x :: Heter.tail xss) in
+        Heter.snoc fxs fx
 
   (* With specializations to simple arity possibly-monadic maps and iterators.  *)
 
   let miterM :
       type x xs n. ((x, xs) cons hlist -> unit M.t) -> ((x, xs) cons, n) Heter.ht -> unit M.t =
    fun f xss ->
-    let* [] =
+    let+ [] =
       pmapM
         (fun x ->
-          let* () = f x in
-          return [])
+          let+ () = f x in
+          [])
         xss Nil in
-    return ()
+    ()
 
   let mmapM :
       type x xs y n. ((x, xs) cons hlist -> y M.t) -> ((x, xs) cons, n) Heter.ht -> (y, n) t M.t =
    fun f xss ->
-    let* [ ys ] =
+    let+ [ ys ] =
       pmapM
         (fun x ->
-          let* y = f x in
-          return [ y ])
+          let+ y = f x in
+          [ y ])
         xss (Cons Nil) in
-    return ys
+    ys
 
   let mapM : type x y n. (x -> y M.t) -> (x, n) t -> (y, n) t M.t =
    fun f xs -> mmapM (fun [ x ] -> f x) [ xs ]
@@ -192,6 +201,11 @@ module Monadic (M : Monad.Plain) = struct
 
   let iterM2 : type x y n. (x -> y -> unit M.t) -> (x, n) t -> (y, n) t -> unit M.t =
    fun f xs ys -> miterM (fun [ x; y ] -> f x y) [ xs; ys ]
+end
+
+module Monadic (M : Monad.Plain) = struct
+  module A = Applicative.OfMonad (M)
+  include Applicatic (A)
 end
 
 let pmap :
@@ -222,6 +236,15 @@ let iter : type a n. (a -> unit) -> (a, n) t -> unit = fun f xs -> miter (fun [ 
 
 let iter2 : type a b n. (a -> b -> unit) -> (a, n) t -> (b, n) t -> unit =
  fun f xs ys -> miter (fun [ x; y ] -> f x y) [ xs; ys ]
+
+(* Generating *)
+
+(* List all the De Bruijn indices for a given nat. *)
+let rec all_indices : type n. n N.t -> (n N.index, n) t = function
+  | Nat Zero -> Emp
+  | Nat (Suc n) ->
+      let xs = all_indices (Nat n) in
+      Snoc (map (fun i -> N.Pop i) xs, Top)
 
 (* Searching *)
 

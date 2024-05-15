@@ -17,6 +17,10 @@ open Raw
 open Parse
 open Asai.Range
 
+let () =
+  Dim.Endpoints.set_len 2;
+  Dim.Endpoints.set_internal true
+
 let parse_term (tm : string) : N.zero check located =
   let p = Parse_term.parse (`String { content = tm; title = Some "user-supplied term" }) in
   let (Term tm) = Parse_term.final p in
@@ -72,14 +76,14 @@ let def (name : string) (ty : string) (tm : string) : unit =
   | _ -> fatal (Invalid_constant_name name)
 
 (* For other commands, we piggyback on ordinary parsing.  *)
+let parse_and_execute_command str =
+  match parse_single_command str with
+  | _, Some cmd -> Command.execute cmd
+  | _, None -> ()
+
 let cmd ?(quiet = false) (str : string) : unit =
   if quiet then Reporter.try_with ~emit:(fun _ -> ()) @@ fun () -> parse_and_execute_command str
   else parse_and_execute_command str
-
-let undef (name : string) : unit =
-  match Scope.lookup [ name ] with
-  | Some const -> Global.remove const
-  | None -> raise (Failure ("Can't undefine undefined constant " ^ name))
 
 let equal_at (tm1 : string) (tm2 : string) (ty : string) : unit =
   let rty = parse_term ty in
@@ -130,29 +134,6 @@ let rec run f =
   Printconfig.run ~env:{ style = `Compact; state = `Term; chars = `Unicode } @@ fun () ->
   Builtins.run @@ fun () ->
   Global.run_empty @@ fun () -> Scope.run f
-
-(* Some operations on natural numbers and vectors, for white-box testing. *)
-
-(* let nat_install_ops () =
-     Reporter.try_with ~emit:(fun _ -> ()) @@ fun () ->
-     def "O" "ℕ" "zero.";
-     def "S" "ℕ → ℕ" "n ↦ suc. n";
-     def "plus" "ℕ → ℕ → ℕ" "m n ↦ match n [
-       | zero. ↦ m
-       | suc. n ↦ suc. (plus m n)
-     ]";
-     cmd "notation 0 plus : m \"+\" n … ≔ plus m n";
-     def "times" "ℕ → ℕ → ℕ"
-       "m n ↦ match n [
-       | zero. ↦ zero.
-       | suc. n ↦ plus (times m n) m
-     ]";
-     cmd "notation 1 times : m \"*\" n … ≔ times m n";
-     def "ℕ_ind" "(P : ℕ → Type) (z : P zero.) (s : (n:ℕ) → P n → P (suc. n)) (n : ℕ) → P n"
-       "P z s n ↦ match n [
-       | zero. ↦ z
-       | suc. n ↦ s n (ℕ_ind P z s n)
-     ]" *)
 
 let gel_install () =
   def "Gel" "(A B : Type) (R : A → B → Type) → Id Type A B" "A B R ↦ sig a b ↦ ( ungel : R a b )"

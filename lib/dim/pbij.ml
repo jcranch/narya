@@ -66,13 +66,13 @@ module Pbij_strings = struct
       (fun [ x ] ->
         match int_of_string_opt x with
         | Some i -> Some (`Int i)
-        | None -> if x = Endpoints.refl_string then Some `Deg else None)
+        | None -> if x = Endpoints.refl_string () then Some `Deg else None)
       [ strs ]
 
   let to_strings : t -> string list =
     List.map (function
       | `Int i -> string_of_int i
-      | `Deg -> Endpoints.refl_string)
+      | `Deg -> Endpoints.refl_string ())
 end
 
 let pbij_of_strings : type ax by. Pbij_strings.t -> ax D.t -> by D.t -> (ax, by) any_pbij option =

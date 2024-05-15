@@ -1,4 +1,6 @@
 open Dim
+open Util
+open Energy
 
 module Raw : sig
   type t
@@ -38,7 +40,7 @@ val make_checked :
   ('unused, 'intrinsic, 'ambient, 'remaining) checked
 
 val equal :
-  ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> ('x1, 'x2) Util.Monoid.compare
+  ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> ('x1, 'x2) Eq.compare
 
 val is_equal : ('x1, 'kx1, 'ky1, 'y1) checked -> ('x2, 'kx2, 'ky2, 'y2) checked -> bool
 val strings_of_checked : ('a, 'ax, 'by, 'b) checked -> string * string list
@@ -53,4 +55,4 @@ type wrap_checked = Wrap : (D.zero, 'kx, 'ky, 'y) checked -> wrap_checked
 type check_zero = Check_zero : ('a, 'ax, 'by, 'b) checked -> check_zero | Uncheck
 
 val check_zero : raw -> check_zero
-val checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Util.Monoid.compare
+val checks_to : raw -> ('a, 'ax, 'by, 'b) checked -> ('a, D.zero) Eq.compare

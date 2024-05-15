@@ -29,15 +29,3 @@ let rec find_opt_and_update_key (test : 'k -> bool) (newkey : 'k) (map : ('k, 'a
       | None -> if test x then Some (y, Snoc (map, (newkey, y))) else None)
 
 let bindings (map : ('k, 'a) t) = Bwd.to_list map
-
-module Monadic (M : Monad.Plain) = struct
-  open Mbwd.Monadic (M)
-  open Monad.Ops (M)
-
-  let mapiM (f : 'k -> 'a -> 'b M.t) (map : ('k, 'a) t) : ('k, 'b) t M.t =
-    mmapM
-      (fun [ (x, a) ] ->
-        let* fxa = f x a in
-        return (x, fxa))
-      [ map ]
-end

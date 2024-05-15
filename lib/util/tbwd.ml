@@ -36,7 +36,7 @@ module Tbwd = struct
         let (Snocs p) = snocs b in
         Snocs (Suc p)
 
-  (* ('a, 'n, 'b) insert says that 'b is obtained by inserting a type 'n somewhere in 'a.  Or, put differently, 'a is obtained from 'b by deleting a type 'n from somewhere. *)
+  (* ('a, 'n, 'b) insert says that 'b is obtained by inserting a type 'n somewhere in 'a.  Or, put differently, 'a is obtained from 'b by deleting a type 'n in a specified location. *)
   type (_, _, _) insert =
     | Now : ('a, 'n, ('a, 'n) snoc) insert
     | Later : ('a, 'n, 'b) insert -> (('a, 'k) snoc, 'n, ('b, 'k) snoc) insert
@@ -194,7 +194,7 @@ module Tbwd = struct
     | Flat_snoc : ('ns, 'm) flatten * ('m, 'n, 'mn) N.plus -> (('ns, 'n) snoc, 'mn) flatten
 
   (* This is a partial function. *)
-  let rec flatten_uniq : type ns m n. (ns, m) flatten -> (ns, n) flatten -> (m, n) Monoid.eq =
+  let rec flatten_uniq : type ns m n. (ns, m) flatten -> (ns, n) flatten -> (m, n) Eq.t =
    fun m n ->
     match (m, n) with
     | Flat_emp, Flat_emp -> Eq
@@ -324,7 +324,7 @@ module Tbwd = struct
 
     val exists : 'p param -> 'a Dom.t -> ('p, 'a) exists
     val out : 'p param -> 'a Dom.t -> ('p, 'a, 'b) t -> 'b Cod.t
-    val uniq : ('p, 'a, 'b1) t -> ('p, 'a, 'b2) t -> ('b1, 'b2) Monoid.eq
+    val uniq : ('p, 'a, 'b1) t -> ('p, 'a, 'b2) t -> ('b1, 'b2) Eq.t
   end
 
   module Map (F : TFun) = struct
@@ -351,7 +351,7 @@ module Tbwd = struct
           let (Exists (y, fx)) = F.exists p x in
           Exists (Of_snoc (ys, y), Map_snoc (fxs, fx))
 
-    let rec uniq : type p xs ys zs. (p, xs, ys) t -> (p, xs, zs) t -> (ys, zs) Monoid.eq =
+    let rec uniq : type p xs ys zs. (p, xs, ys) t -> (p, xs, zs) t -> (ys, zs) Eq.t =
      fun fxs fxs' ->
       match (fxs, fxs') with
       | Map_emp, Map_emp -> Eq

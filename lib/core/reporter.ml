@@ -110,7 +110,7 @@ module Code = struct
     | Unbound_variable_in_notation : string list -> t
     | Head_already_has_notation : string -> t
     | Constant_assumed : printable -> t
-    | Constant_defined : printable -> t
+    | Constant_defined : printable list -> t
     | Notation_defined : string -> t
     | Show : string * printable -> t
     | Comment_end_in_string : t
@@ -120,6 +120,8 @@ module Code = struct
     | Wrong_boundary_of_record : int -> t
     | Invalid_constructor_type : Constr.t -> t
     | Missing_constructor_type : Constr.t -> t
+    | Locked_variable : t
+    | Locked_axiom : printable -> t
 
   (** The default severity of messages with a particular message code. *)
   let default_severity : t -> Asai.Diagnostic.severity = function
@@ -210,6 +212,8 @@ module Code = struct
     | Missing_constructor_type _ -> Error
     | Positional_higher_method _ -> Error
     | Invalid_higher_method _ -> Error
+    | Locked_variable -> Error
+    | Locked_axiom _ -> Error
 
   (** A short, concise, ideally Google-able string representation for each message code. *)
   let short_code : t -> string = function
@@ -234,6 +238,8 @@ module Code = struct
     (* Scope errors *)
     | Unbound_variable _ -> "E0300"
     | Undefined_constant _ -> "E0301"
+    | Locked_variable -> "E0302"
+    | Locked_axiom _ -> "E0303"
     (* Bidirectional typechecking *)
     | Nonsynthesizing _ -> "E0400"
     | Unequal_synthesized_type _ -> "E0401"
@@ -332,8 +338,7 @@ module Code = struct
     | Invalid_constr str -> textf "invalid constructor name: %s" str
     | Invalid_numeral str -> textf "invalid numeral: %s" str
     | Invalid_degeneracy str ->
-        if str = "" then text "missing degeneracy ('^' must not be followed by a space)"
-        else textf "invalid degeneracy: %s" str
+        if str = "" then text "missing degeneracy" else textf "invalid degeneracy: %s" str
     | Invalid_variable_face (k, fa) ->
         textf "invalid face: %d-dimensional variable has no face %s" (to_int k) (string_of_sface fa)
     | No_relative_precedence (n1, n2) ->
@@ -494,7 +499,15 @@ module Code = struct
     | Head_already_has_notation name ->
         textf "replacing printing notation for %s (previous notation will still be parseable)" name
     | Constant_assumed name -> textf "Axiom %a assumed" pp_printed (print name)
-    | Constant_defined name -> textf "Constant %a defined" pp_printed (print name)
+    | Constant_defined names -> (
+        match names with
+        | [] -> textf "Anomaly: no constant defined"
+        | [ name ] -> textf "Constant %a defined" pp_printed (print name)
+        | _ ->
+            textf "@[<v 2>Constants defined mutually:@,%a@]"
+              (fun ppf names ->
+                pp_print_list (fun ppf name -> pp_printed ppf (print name)) ppf names)
+              names)
     | Notation_defined name -> textf "Notation %s defined" name
     | Show (str, x) -> textf "%s: %a" str pp_printed (print x)
     | Comment_end_in_string ->
@@ -524,6 +537,8 @@ module Code = struct
     | Invalid_higher_method fld ->
         textf "higher method %s must have a pure dimension without permutations"
           (Field.string_of_raw fld)
+    | Locked_variable -> text "variable locked behind external degeneracy"
+    | Locked_axiom a -> textf "axiom %a locked behind external degeneracy" pp_printed (print a)
 end
 
 include Asai.StructuredReporter.Make (Code)
