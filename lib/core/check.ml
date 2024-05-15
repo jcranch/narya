@@ -55,7 +55,7 @@ let vars_of_vec :
   end in
   let module Build = NICubeOf.Traverse (S) in
   match
-    Build.build dim
+    Build.build_left dim
       {
         build =
           (fun _ -> function
@@ -91,6 +91,10 @@ type (_, _) status =
   | Potential :
       Constant.t * app Bwd.t * (('b, potential) term -> (emp, potential) term)
       -> ('b, potential) status
+
+let energy : type b s. (b, s) status -> s energy = function
+  | Kinetic -> Kinetic
+  | Potential _ -> Potential
 
 (* The output of checking a telescope includes an extended context. *)
 type (_, _) checked_tel =
@@ -148,7 +152,7 @@ let rec check :
                 end in
                 let module Build = NICubeOf.Traverse (S) in
                 match
-                  Build.build m
+                  Build.build_left m
                     {
                       build =
                         (fun _ -> function
@@ -163,7 +167,7 @@ let rec check :
                     let xs = Variables (D.zero, D.zero_plus m, names) in
                     let status = mkstatus status m xs newnfs in
                     ( xs,
-                      check status (Ctx.vis ctx D.zero (D.zero_plus m) af names newnfs) body output
+                      check status (Ctx.vis ctx D.zero (D.zero_plus m) names newnfs af) body output
                     )
                 | Wrap (_, Missing (loc, j)) -> fatal ?loc (Not_enough_lambdas j))
             | `Cube ->
@@ -198,17 +202,12 @@ let rec check :
           _;
         },
       _ ) -> (
-      (* We don't need the *types* of the parameters or indices, which are stored in the type of the constant name.  ty_indices contains the *values* of the indices of this instance of the datatype, while tyargs (defined by full_inst, way above) contains the instantiation arguments of this instance of the datatype. *)
-      let (Dataconstr { env; args = constr_arg_tys; indices = constr_indices }) =
-        match Constr.Map.find_opt constr constrs with
-        | Some c -> c
-        | None ->
-            with_loc constr_loc @@ fun () ->
-            fatal (No_such_constructor (`Data (PConstant name), constr)) in
-      (* To typecheck a higher-dimensional instance of our constructor constr at the datatype, all the instantiation arguments must also be applications of lower-dimensional versions of that same constructor.  We check this, and extract the arguments of those lower-dimensional constructors as a tube of lists. *)
-      match D.compare (TubeOf.inst tyargs) dim with
-      | Neq -> fatal (Dimension_mismatch ("checking constr", dim_env env, dim))
-      | Eq -> (
+      (* We don't need the *types* of the parameters or indices, which are stored in the type of the constant name.  The variable ty_indices (defined above) contains the *values* of the indices of this instance of the datatype, while tyargs (defined by full_inst, way above) contains the instantiation arguments of this instance of the datatype.  We check that the dimensions agree, and find our current constructor in the datatype definition. *)
+      match (D.compare (TubeOf.inst tyargs) dim, Constr.Map.find_opt constr constrs) with
+      | _, None -> fatal ?loc:constr_loc (No_such_constructor (`Data (PConstant name), constr))
+      | Neq, _ -> fatal (Dimension_mismatch ("checking constr", TubeOf.inst tyargs, dim))
+      | Eq, Some (Dataconstr { env; args = constr_arg_tys; indices = constr_indices }) -> (
+          (* To typecheck a higher-dimensional instance of our constructor constr at the datatype, all the instantiation arguments must also be applications of lower-dimensional versions of that same constructor.  We check this, and extract the arguments of those lower-dimensional constructors as a tube of lists in the variable "tyarg_args". *)
           let tyarg_args =
             TubeOf.mmap
               {
@@ -227,7 +226,11 @@ let rec check :
                           (Missing_instantiation_constructor (constr, `Nonconstr (PNormal (ctx, tm)))));
               }
               [ tyargs ] in
-          (* Now we evaluate each argument *type* of the constructor at (the parameters and) the previous evaluated argument *values*, check each argument value against the corresponding argument type, and then evaluate it and add it to the environment (to substitute into the subsequent types, and also later to the indices). *)
+          (* Now, for each argument of the constructor, we:
+             1. Evaluate the argument *type* of the constructor (which are assembled in the telescope constr_arg_tys) at the parameters (which are in the environment already) and the previous evaluated argument *values* (which get added to the environment as we go throurgh check_at_tel);
+             2. Instantiate the result at the corresponding arguments of the lower-dimensional versions of the constructor, from tyarg_args;
+             3. Check the coressponding argument *value*, supplied by the user, against this type;
+             4. Evaluate this argument value and add it to the environment, to substitute into the subsequent types, and also later to the indices. *)
           let env, newargs =
             check_at_tel constr ctx env (Bwd.to_list args) constr_arg_tys tyarg_args in
           (* Now we substitute all those evaluated arguments into the indices, to get the actual (higher-dimensional) indices of our constructor application. *)
@@ -266,8 +269,9 @@ let rec check :
   | Match (ix, brs), _, Potential _ -> (
       (* The variable must not be let-bound to a value.  Checking that it isn't also gives us its De Bruijn level, its type, and its index in the full context including invisible variables. *)
       match Ctx.lookup ctx ix with
-      | None, _, ix -> fatal (Matching_on_let_bound_variable (PTerm (ctx, Var ix)))
-      | Some lvl, { tm = _; ty = varty }, ix -> (
+      | `Field (_, _, fld) -> fatal (Matching_on_record_field fld)
+      | `Var (None, _, ix) -> fatal (Matching_on_let_bound_variable (PTerm (ctx, Var ix)))
+      | `Var (Some lvl, { tm = _; ty = varty }, ix) -> (
           (* The type of the variable must be a datatype, without any degeneracy applied outside, and at the same dimension as its instantiation. *)
           let (Fullinst (uvarty, inst_args)) = full_inst varty "check_tree (top)" in
           match uvarty with
@@ -342,7 +346,7 @@ let rec check :
                                     })
                                 index_terms in
                             (* Assemble a term consisting of the constructor applied to the new variables, along with its boundary, and their types.  To compute their types, we have to extract the datatype applied to its parameters only, pass to boundaries if necessary, and then re-apply it to the new indices. *)
-                            let params, _ = Bwv.unappend_bwd (Bwv.length indices) varty_args in
+                            let params, _ = Bwv.take_bwd (Bwv.length indices) varty_args in
                             let argtbl = Hashtbl.create 10 in
                             let constr_nfs =
                               CubeOf.build dim
@@ -409,34 +413,7 @@ let rec check :
                                           [ vs; cs ])
                                       index_vars indices;
                                     (* Now we let-bind the match variable to the constructor applied to these new variables, the "index_vars" to the index values, and the inst_vars to the boundary constructor values.  The operation Ctx.bind_some automatically substitutes these new values into the types and values of other variables in the context, and reorders it if necessary so that each variable only depends on previous ones. *)
-                                    match
-                                      Ctx.bind_some
-                                        {
-                                          nf =
-                                            (fun ~oldctx ~newctx nf ->
-                                              Reporter.try_with ~fatal:(fun d ->
-                                                  match d.message with
-                                                  | No_such_level _ -> None
-                                                  | _ -> fatal_diagnostic d)
-                                              @@ fun () ->
-                                              let tm = readback_nf oldctx nf in
-                                              let ty = readback_val oldctx nf.ty in
-                                              let (Val etm) = Ctx.eval newctx tm in
-                                              let (Val ety) = Ctx.eval newctx ty in
-                                              Some { tm = etm; ty = ety });
-                                          ty =
-                                            (fun ~oldctx ~newctx ty ->
-                                              Reporter.try_with ~fatal:(fun d ->
-                                                  match d.message with
-                                                  | No_such_level _ -> None
-                                                  | _ -> fatal_diagnostic d)
-                                              @@ fun () ->
-                                              let ty = readback_val oldctx ty in
-                                              let (Val ety) = Ctx.eval newctx ty in
-                                              Some ety);
-                                        }
-                                        (Hashtbl.find_opt new_vals) newctx
-                                    with
+                                    match Bindsome.bind_some (Hashtbl.find_opt new_vals) newctx with
                                     | None -> fatal No_permutation
                                     | Bind_some { checked_perm; oldctx; newctx } ->
                                         (* We readback the index and instantiation values into this new context and discard the result, catching No_such_level to turn it into a user Error.  This has the effect of doing an occurs-check that none of the index variables occur in any of the index values.  This is a bit less general than the CDP Solution rule, which (when applied one variable at a time) prohibits only cycles of occurrence. *)
@@ -534,17 +511,35 @@ let rec check :
         }
         ty
   | Empty_co_match, _, _ -> check status ctx { value = Struct (Noeta, Abwd.empty); loc = tm.loc } ty
-  | Codata (eta, cube, fields), UU m, Potential _ -> (
+  | Codata fields, UU m, Potential _ -> (
       match D.compare (TubeOf.inst tyargs) m with
       | Neq -> fatal (Dimension_mismatch ("checking codata", TubeOf.inst tyargs, m))
-      | Eq -> check_codata status ctx eta tyargs Emp cube (Bwd.to_list fields))
+      | Eq -> check_codata status ctx tyargs Emp (Bwd.to_list fields))
   | Codata _, _, Potential _ ->
       fatal (Checking_canonical_at_nonuniverse ("codatatype", PVal (ctx, ty)))
   | Codata _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "codatatype")
+  | Record (abc, xs, fields), UU m, Potential _ -> (
+      match D.compare (TubeOf.inst tyargs) m with
+      | Neq -> fatal (Dimension_mismatch ("checking record", TubeOf.inst tyargs, m))
+      | Eq ->
+          let dim = TubeOf.inst tyargs in
+          let (Vars (af, vars)) = vars_of_vec abc.loc dim abc.value xs in
+          check_record status dim ctx tyargs vars Emp Zero af Emp fields)
+  | Record _, _, Potential _ ->
+      fatal (Checking_canonical_at_nonuniverse ("record type", PVal (ctx, ty)))
+  | Record _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "record type")
   | Data constrs, _, Potential _ ->
       let (Plus_something num_indices) = N.plus_of_int (typefam ctx ty) in
       check_data status ctx ty (Nat num_indices) Constr.Map.empty (Bwd.to_list constrs)
   | Data _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "datatype")
+  | Hole vars, _, _ ->
+      let energy = energy status in
+      let meta = Meta.make `Hole (Ctx.dbwd ctx) energy in
+      let ty = readback_val ctx ty in
+      let termctx = readback_ctx ctx in
+      Galaxy.add meta vars termctx ty energy;
+      emit (Hole_generated (meta, Termctx.PHole (vars, termctx, ty)));
+      Meta meta
 
 and check_data :
     type a b i bi.
@@ -625,54 +620,80 @@ and get_indices :
         output
   | _ -> fatal (Invalid_constructor_type c)
 
+(* The common prefix of checking a codatatype or record type, which dynamically binds the current constant to the up-until-now value.  Since this binding has to scope over the rest of the functions that are specific to codata or records, it uses CPS. *)
+and with_codata_so_far :
+    type a b n c.
+    (b, potential) status ->
+    potential eta ->
+    (a, b) Ctx.t ->
+    n D.t ->
+    (D.zero, n, n, normal) TubeOf.t ->
+    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    ((n, Ctx.Binding.t) CubeOf.t -> c) ->
+    c =
+ fun (Potential (name, args, hyp)) eta ctx dim tyargs checked_fields cont ->
+  (* We can always create a constant with the (0,0,0) insertion, even if its dimension is actually higher. *)
+  let head = Value.Const { name; ins = zero_ins D.zero } in
+  let alignment =
+    Lawful (Codata { eta; env = Ctx.env ctx; ins = zero_ins dim; fields = checked_fields }) in
+  let prev_ety =
+    Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
+  let _, domvars =
+    dom_vars (Ctx.length ctx)
+      (TubeOf.plus_cube
+         (TubeOf.mmap { map = (fun _ [ nf ] -> nf.tm) } [ tyargs ])
+         (CubeOf.singleton prev_ety)) in
+  Global.run_with_definition name
+    (Defined (hyp (Term.Canonical (Codata (eta, dim, checked_fields)))))
+  @@ fun () -> cont domvars
+
 and check_codata :
-    type a c ac b n.
+    type a b n.
     (b, potential) status ->
     (a, b) Ctx.t ->
-    potential eta ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (b, n) Term.codatafield Bwd.t ->
-    (a, ac) codata_vars ->
-    (Field.raw * ac check located) list ->
+    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (Field.t * (string option * a N.suc check located)) list ->
     (b, potential) term =
- fun status ctx eta tyargs checked_fields cube raw_fields ->
+ fun status ctx tyargs checked_fields raw_fields ->
   let dim = TubeOf.inst tyargs in
-  match (raw_fields, status) with
-  | [], _ -> Canonical (Codata (eta, dim, checked_fields))
-  | (fld, rty) :: raw_fields, Potential (name, args, hyp) -> (
+  match raw_fields with
+  | [] -> Canonical (Codata (Noeta, dim, checked_fields))
+  | (fld, (x, rty)) :: raw_fields ->
       (* TODO: When higher fields are allowed, check_zero will also return a dimension, which we have to degenerate the context by to check the field type. *)
       let fld = Field.check_zero fld <|> Invalid_higher_method fld in
-      (* Temporarily bind the current constant to the up-until-now value. *)
-      Global.run_with_definition name
-        (Defined (hyp (Term.Canonical (Codata (eta, dim, checked_fields)))))
-      @@ fun () ->
-      let head = Value.Const { name; ins = ins_zero dim } in
-      let (Id_ins ins) = id_ins D.zero dim in
-      let env = Ctx.env ctx in
-      let fields =
-        Bwd.map
-          (fun (Term.Codatafield { name; ty }) -> Value.Codatafield { env; name; ty })
-          checked_fields in
-      let alignment = Lawful (Codata { eta; ins; fields }) in
-      let prev_ety =
-        Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
-      let _, domvars =
-        dom_vars (Ctx.length ctx)
-          (TubeOf.plus_cube
-             (TubeOf.mmap { map = (fun _ [ nf ] -> nf.tm) } [ tyargs ])
-             (CubeOf.singleton prev_ety)) in
-      match cube with
-      | Cube x ->
-          let newctx = Ctx.cube_vis ctx x domvars in
-          let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, Codatafield { name = fld; ty = cty }) in
-          check_codata status ctx eta tyargs checked_fields cube raw_fields
-      | Normal ({ value = abc; loc }, xs) ->
-          let (Vars (ab, names)) = vars_of_vec loc dim abc xs in
-          let newctx = Ctx.vis ctx D.zero (D.zero_plus dim) ab names domvars in
-          let cty = check Kinetic newctx rty (universe D.zero) in
-          let checked_fields = Snoc (checked_fields, Codatafield {name = fld; ty= cty}) in
-          check_codata status ctx eta tyargs checked_fields cube raw_fields)
+      with_codata_so_far status Noeta ctx dim tyargs checked_fields @@ fun domvars ->
+      let newctx = Ctx.cube_vis ctx x domvars in
+      let cty = check Kinetic newctx rty (universe D.zero) in
+      let checked_fields = Snoc (checked_fields, (fld, cty)) in
+      check_codata status ctx tyargs checked_fields raw_fields
+
+and check_record :
+    type a f1 f2 f af d acd b n.
+    (b, potential) status ->
+    n D.t ->
+    (a, b) Ctx.t ->
+    (D.zero, n, n, normal) TubeOf.t ->
+    (N.zero, n, string option, f1) NICubeOf.t ->
+    (Field.t * string, f2) Bwv.t ->
+    (f1, f2, f) N.plus ->
+    (a, f, af) N.plus ->
+    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (af, d, acd) Raw.tel ->
+    (b, potential) term =
+ fun status dim ctx tyargs vars ctx_fields fplus af checked_fields raw_fields ->
+  match raw_fields with
+  | Emp -> Term.Canonical (Codata (Eta, dim, checked_fields))
+  | Ext (None, _, _) -> fatal (Anomaly "unnamed field in check_record")
+  | Ext (Some name, rty, raw_fields) ->
+      with_codata_so_far status Eta ctx dim tyargs checked_fields @@ fun domvars ->
+      let newctx = Ctx.vis_fields ctx vars domvars ctx_fields fplus af in
+      let cty = check Kinetic newctx rty (universe D.zero) in
+      let fld = Field.intern name in
+      let checked_fields = Snoc (checked_fields, (fld, cty)) in
+      let ctx_fields = Bwv.Snoc (ctx_fields, (fld, name)) in
+      check_record status dim ctx tyargs vars ctx_fields (Suc fplus) (Suc af) checked_fields
+        raw_fields
 
 and check_struct :
     type a b c s m n.
@@ -763,7 +784,9 @@ and check_field :
         Potential
           ( c,
             Snoc (args, App (Field fld, ins_zero D.zero)),
-            fun value -> hyp (Term.Struct (eta, dim, Snoc (ctms, Structfield { name = fld; value; labeled }))) ) in
+            fun value ->
+              hyp (Term.Struct (eta, dim, Snoc (ctms, Structfield { name = fld; value; labeled })))
+          ) in
   let ety = tyof_field prev_etm ty fld in
   match
     Abwd.find_opt_and_update_key
@@ -798,9 +821,13 @@ and synth : type a b. (a, b) Ctx.t -> a synth located -> (b, kinetic) term * kin
  fun ctx tm ->
   with_loc tm.loc @@ fun () ->
   match tm.value with
-  | Var i ->
-      let _, x, v = Ctx.lookup ctx i in
-      (Term.Var v, x.ty)
+  | Var i -> (
+      match Ctx.lookup ctx i with
+      | `Var (_, x, v) -> (Term.Var v, x.ty)
+      | `Field (lvl, x, fld) -> (
+          match Ctx.find_level ctx lvl with
+          | Some v -> (Term.Field (Var v, fld), tyof_field x.tm x.ty fld)
+          | None -> fatal (Anomaly "level not found in field view")))
   | Const name ->
       let ty, _ = Global.find_opt name <|> Undefined_constant (PConstant name) in
       (Const name, eval_term (Emp D.zero) ty)
@@ -979,14 +1006,17 @@ and synth_app :
       with_loc sfn.loc @@ fun () ->
       fatal (Applying_nonfunction_nontype (PTerm (ctx, sfn.value), PUninst (ctx, fnty)))
 
-(* Check a list of terms against the types specified in a telescope, evaluating the latter in a supplied environment and in the context of the previously checked terms, and instantiating them at values given in a tube. *)
+(* Check a list of terms against the types specified in a telescope, evaluating the latter in a supplied environment and in the context of the previously checked terms, and instantiating them at values given in a tube.  See description in context of the call to it above during typechecking of a constructor. *)
 and check_at_tel :
     type n a b c bc e.
     Constr.t ->
     (a, e) Ctx.t ->
     (n, b) env ->
+    (* This list of terms to check must have the same length *)
     a check located list ->
+    (* as this telescope (namely, the Fwn 'c') *)
     (b, c, bc) Telescope.t ->
+    (* and as all the lists in this tube. *)
     (D.zero, n, n, kinetic value list) TubeOf.t ->
     (n, bc) env * (n, (e, kinetic) term) CubeOf.t list =
  fun c ctx env tms tys tyargs ->
@@ -1039,8 +1069,7 @@ and check_at_tel :
         (Wrong_number_of_arguments_to_constructor
            (c, List.length tms - Fwn.to_int (Telescope.length tys)))
 
-(* Given a raw telescope and a context, we can check it to produce a checked telescope and also a new context extended by that telescope. *)
-
+(* Given a context and a raw telescope, we can check it to produce a checked telescope and also a new context extended by that telescope. *)
 and check_tel : type a b c ac. (a, b) Ctx.t -> (a, c, ac) Raw.tel -> (ac, b) checked_tel =
  fun ctx tel ->
   match tel with

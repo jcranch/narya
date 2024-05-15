@@ -35,9 +35,14 @@ module Raw = struct
     (* "[]", which could be either an empty match or an empty comatch *)
     | Empty_co_match : 'a check
     | Data : (Constr.t, 'a dataconstr located) Abwd.t -> 'a check
-    | Codata :
-        (potential, 'eta) eta * ('a, 'ac) codata_vars * (Field.raw, 'ac check located) Abwd.t
+    (* A codatatype binds one more "self" variable in the types of each of its fields.  For a higher-dimensional codatatype (like a codata version of Gel), this becomes a cube of variables. *)
+    | Codata : (Field.raw, string option * 'a N.suc check located) Abwd.t -> 'a check
+    (* A record type binds its "self" variable namelessly, exposing it to the user by additional variables that are bound locally to its fields.  This can't be "cubeified" as easily, so we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one. *)
+    | Record :
+        ('a, 'c, 'ac) Fwn.bplus located * (string option, 'c) Vec.t * ('ac, 'd, 'acd) tel
         -> 'a check
+    (* A hole must store the entire "state" from when it was entered, so that the user can later go back and fill it with a term that would have been valid in its original position.  This includes the variables in lexical scope, which are available only during parsing, so we store them here at that point.  During typechecking, when the actual metavariable is created, we save the lexical scope along with its other context and type data. *)
+    | Hole : (string option, 'a) Bwv.t -> 'a check
 
   and _ branch =
     (* The location of the third argument is that of the entire pattern. *)
@@ -49,12 +54,6 @@ module Raw = struct
         -> 'a branch
 
   and _ dataconstr = Dataconstr : ('a, 'b, 'ab) tel * 'ab check located option -> 'a dataconstr
-
-  (* A normal codatatype binds one more "self" variable in the types of its fields.  A normal record type does the same, except that the user doesn't have a name for that variable and instead accesses it by lexical variables that postprocess to its fields using Varscope. *)
-  and (_, _) codata_vars =
-    | Cube : string option -> ('a, 'a N.suc) codata_vars
-    (* A higher-dimensional codatatype simply binds a "self" cube of variables, but unfortunately a higher-dimensional record type doesn't have any variable to make a cube.  So we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one. *)
-    | Normal : ('a, 'c, 'ac) Fwn.bplus located * (string option, 'c) Vec.t -> ('a, 'ac) codata_vars
 
   (* An ('a, 'b, 'ab) tel is a raw telescope of length 'b in context 'a, with 'ab = 'a+'b the extended context. *)
   and (_, _, _) tel =
@@ -72,6 +71,7 @@ end
 
 (* ******************** Names ******************** *)
 
+(* An element of "mn variables" is an mn-dimensional cube of variables where mn = m + n and the user specified names for n dimensions, with the other m dimensions being named with face suffixes.  *)
 type _ variables =
   | Variables :
       'm D.t * ('m, 'n, 'mn) D.plus * (N.zero, 'n, string option, 'f) NICubeOf.t
@@ -84,9 +84,6 @@ let dim_variables : type m. m variables -> m D.t = function
 
 let singleton_variables : type m. m D.t -> string option -> m variables =
  fun m x -> Variables (m, D.plus_zero m, NICubeOf.singleton x)
-
-let singleton_named_variables : type m. m D.t -> string option -> m variables =
- fun m x -> singleton_variables m (Some (Option.value x ~default:"x"))
 
 (* ******************** Typechecked terms ******************** *)
 
@@ -109,6 +106,8 @@ module rec Term : sig
   type (_, _) term =
     | Var : 'a index -> ('a, kinetic) term
     | Const : Constant.t -> ('a, kinetic) term
+    | Meta : ('a, 's) Meta.t -> ('a, 's) term
+    | MetaEnv : ('b, kinetic) Meta.t * ('a, 'n, 'b) env -> ('a, kinetic) term
     | Field : ('a, kinetic) term * (D.zero, 'kx, 'my, 'm) Field.checked -> ('a, kinetic) term
     | UU : 'n D.t -> ('a, kinetic) term
     | Inst : ('a, kinetic) term * ('m, 'n, 'mn, ('a, kinetic) term) TubeOf.t -> ('a, kinetic) term
@@ -174,6 +173,12 @@ module rec Term : sig
     | Ext :
         string option * ('a, kinetic) term * (('a, D.zero) snoc, 'b, 'ab) tel
         -> ('a, 'b Fwn.suc, 'ab) tel
+
+  and (_, _, _) env =
+    | Emp : 'n D.t -> ('a, 'n, emp) env
+    | Ext :
+        ('a, 'n, 'b) env * ('k, ('n, ('a, kinetic) term) CubeOf.t) CubeOf.t
+        -> ('a, 'n, ('b, 'k) snoc) env
 end = struct
   module CodFam = struct
     type ('k, 'a) t = (('a, 'k) snoc, kinetic) Term.term
@@ -188,7 +193,10 @@ end = struct
     (* Most term-formers only appear in kinetic (ordinary) terms. *)
     | Var : 'a index -> ('a, kinetic) term
     | Const : Constant.t -> ('a, kinetic) term
-    (* When projecting out a field, it can't have any leftover higher dimensions. *)
+    | Meta : ('a, 's) Meta.t -> ('a, 's) term
+    (* Normally, checked metavariables don't require an environment attached, but they do when they arise by readback from a value metavariable. *)
+    | MetaEnv : ('b, kinetic) Meta.t * ('a, 'n, 'b) env -> ('a, kinetic) term
+      (* When projecting out a field, it can't have any leftover higher dimensions. *)
     | Field : ('a, kinetic) term * (D.zero, 'kx, 'my, 'm) Field.checked -> ('a, kinetic) term
     | UU : 'n D.t -> ('a, kinetic) term
     | Inst : ('a, kinetic) term * ('m, 'n, 'mn, ('a, kinetic) term) TubeOf.t -> ('a, kinetic) term
@@ -265,6 +273,13 @@ end = struct
     | Ext :
         string option * ('a, kinetic) term * (('a, D.zero) snoc, 'b, 'ab) tel
         -> ('a, 'b Fwn.suc, 'ab) tel
+
+  (* A version of an environment (see below) that involves terms rather than values.  Used mainly when reading back metavariables. *)
+  and (_, _, _) env =
+    | Emp : 'n D.t -> ('a, 'n, emp) env
+    | Ext :
+        ('a, 'n, 'b) env * ('k, ('n, ('a, kinetic) term) CubeOf.t) CubeOf.t
+        -> ('a, 'n, ('b, 'k) snoc) env
 end
 
 open Term
@@ -304,6 +319,10 @@ module Telescope = struct
     | Ext (x, _, doms) -> Lam (singleton_variables D.zero x, lams doms body)
 end
 
+let rec dim_term_env : type a n b. (a, n, b) env -> n D.t = function
+  | Emp n -> n
+  | Ext (e, _) -> dim_term_env e
+
 (* ******************** Values ******************** *)
 
 (* A De Bruijn level is a pair of integers: one for the position (counting in) of the cube-variable-bundle in the context, and one that counts through the faces of that bundle. *)
@@ -322,10 +341,17 @@ module rec Value : sig
 
   type var
   type const
+  type meta
 
   type 'h head =
     | Var : { level : level; deg : ('m, 'n) deg } -> var head
     | Const : { name : Constant.t; ins : ('a, 'b, 'c) insertion } -> const head
+    | Meta : {
+        meta : ('b, kinetic) Meta.t;
+        env : ('m, 'b) env;
+        ins : ('mn, 'm, 'n) insertion;
+      }
+        -> meta head
 
   and 'n arg =
     | Arg of ('n, normal) CubeOf.t
@@ -441,13 +467,22 @@ end = struct
 
   type var = private Dummy_var
   type const = private Dummy_const
+  type meta = private Dummy_meta
 
   (* The head of an elimination spine is either a variable or a constant.  We define this type to be parametrized over a pair of dummy indices indicating which it is, so that most of the time we can treat them equally by parametrizing over the index, but in some places (e.g. alignment) we can specify that only one kind of head is allowed. *)
   type _ head =
     (* A variable is determined by a De Bruijn LEVEL, and stores a neutral degeneracy applied to it. *)
     | Var : { level : level; deg : ('m, 'n) deg } -> var head
-    (* A constant also stores a dimension that it is substituted to and a neutral insertion applied to it.  Many constants are zero-dimensional, meaning that 'c' is zero, and hence a=b is just a dimension and the insertion is trivial. *)
+    (* A constant also stores a dimension that it is substituted to and a neutral insertion applied to it.  Many constants are zero-dimensional, meaning that 'c' is zero, and hence a=b is just a dimension and the insertion is trivial.  The dimension of a constant is its dimension as a term standing on its own; so in particular if it has any parameters, then it belongs to an ordinary, 0-dimensional, pi-type and therefore is 0-dimensional, even if the eventual codomain of the pi-type is higher-dimensional.  Note also that when nonidentity insertions end up getting stored here, e.g. by Act, the dimension 'c gets extended as necessary; so it is always okay to create a constant with the (0,0,0) insertion to start with, even if you don't know what its actual dimension is. *)
     | Const : { name : Constant.t; ins : ('a, 'b, 'c) insertion } -> const head
+    (* A metavariable (i.e. flexible) head stores the metavariable along with a delayed substitution applied to it. *)
+    | Meta : {
+        (* Only kinetic metavariables can appear in values; potential ones just cause the case tree they appear in to be stuck. *)
+        meta : ('b, kinetic) Meta.t;
+        env : ('m, 'b) env;
+        ins : ('mn, 'm, 'n) insertion;
+      }
+        -> meta head
 
   (* An application contains the data of an n-dimensional argument and its boundary, together with a neutral insertion applied outside that can't be pushed in.  This represents the *argument list* of a single application, not the function.  Thus, an application spine will be a head together with a list of apps. *)
   and 'n arg =

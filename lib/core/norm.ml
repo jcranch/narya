@@ -65,8 +65,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                   build =
                     (fun fa ->
                       (* To compute those lower-dimensional versions, we recursively evaluate the same constant in lower-dimensional contexts. *)
-                      let (Val tm) =
-                        eval (Act (env, op_of_sface (sface_of_tface fa))) (Const name) in
+                      let tm = eval_term (Act (env, op_of_sface (sface_of_tface fa))) (Const name) in
                       (* We need to know the type of each lower-dimensional version in order to annotate it as a "normal" instantiation argument.  But we already computed that type while evaluating the term itself, since as a normal term it had to be annotated with its type. *)
                       match tm with
                       | Uninst (Neu _, (lazy ty)) -> { tm; ty }
@@ -82,6 +81,39 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
           (* Since a top-level case tree is in the empty context, it doesn't have't anything to stuck-match against. *)
           | Unrealized -> fatal (Anomaly "true neutral case tree in empty context"))
       | Axiom -> Val (Uninst (Neu { head; args = Emp; alignment = True }, ty)))
+  | Meta meta -> (
+      match Galaxy1.find meta <|> Undefined_metavariable (PMeta meta) with
+      | { tm = Some tm; _ } -> eval env tm
+      (* If a potential metavariable appears in a case tree, then that branch of the case tree is stuck.  We don't need to return the metavariable itself; it suffices to know that that branch of the case tree is stuck, as the constant whose definition it is should handle all identity/equality checks correctly. *)
+      | { tm = None; energy = Potential; _ } -> Unrealized
+      | { tm = None; ty; energy = Kinetic } ->
+          let dim = dim_env env in
+          (* As with constants, we need to instantiate the type at the same meta evaluated at lower dimensions. *)
+          let ty =
+            lazy
+              (inst (eval_term env ty)
+                 (TubeOf.build D.zero (D.zero_plus dim)
+                    {
+                      build =
+                        (fun fa ->
+                          let tm =
+                            eval_term (Act (env, op_of_sface (sface_of_tface fa))) (Meta meta) in
+                          match tm with
+                          | Uninst (Neu _, (lazy ty)) -> { tm; ty }
+                          | _ -> fatal (Anomaly "eval of lower-dim meta not neutral/canonical"));
+                    })) in
+          Val
+            (Uninst
+               ( Neu
+                   {
+                     head = Value.Meta { meta; env; ins = ins_zero dim };
+                     args = Emp;
+                     alignment = True;
+                   },
+                 ty )))
+  | MetaEnv (meta, metaenv) ->
+      let (Plus m_n) = D.plus (dim_term_env metaenv) in
+      eval (eval_env env m_n metaenv) (Term.Meta meta)
   | UU n ->
       let m = dim_env env in
       let (Plus mn) = D.plus n in
@@ -117,7 +149,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                     let pq' = D.plus_out p pq in
                     let Eq = D.plus_uniq (cod_plus_of_tface fcd) nk in
                     (* Thus tm is p+q dimensional. *)
-                    let (Val tm) = eval (Act (env, op_of_sface fb)) (TubeOf.find args fcd) in
+                    let tm = eval_term (Act (env, op_of_sface fb)) (TubeOf.find args fcd) in
                     (* So its type needs to be fully instantiated at that dimension. *)
                     let ty =
                       inst ty
@@ -143,7 +175,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       Val (Lam (Variables (D.plus_out m m_n, mn_k, vars), eval_binder env m_nk body))
   | App (fn, args) ->
       (* First we evaluate the function. *)
-      let (Val efn) = eval env fn in
+      let efn = eval_term env fn in
       (* The environment is m-dimensional and the original application is n-dimensional, so the *substituted* application is m+n dimensional.  Thus must therefore match the dimension of the function being applied. *)
       let m = dim_env env in
       let n = CubeOf.dim args in
@@ -159,14 +191,11 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                 (* ...we decompose it as a sum of a face "fa" of m and a face "fb" of n... *)
                 let (SFace_of_plus (_, fa, fb)) = sface_of_plus m_n fab in
                 (* ...and evaluate the supplied argument indexed by the face fb of n, in an environment acted on by the face fa of m. *)
-                let (Val v) = eval (Act (env, op_of_sface fa)) (CubeOf.find args fb) in
-                v);
+                eval_term (Act (env, op_of_sface fa)) (CubeOf.find args fb));
           } in
       (* Having evaluated the function and its arguments, we now pass the job off to a helper function. *)
       apply efn eargs
-  | Field (tm, fld) ->
-      let (Val etm) = eval env tm in
-      Val (field etm fld)
+  | Field (tm, fld) -> Val (field (eval_term env tm) fld)
   | Struct (_, dim, fieldnames, fields) ->
       let (Id_ins mk) = id_ins (dim_env env) dim in
       (* It's okay to use ins_zero here, even though the struct might be higher-dimensional (e.g. a Gel), because the insertion gets extended to the right as necessary when it's acted on, by insfact_comp. *)
@@ -188,8 +217,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
             build =
               (fun fab ->
                 let (SFace_of_plus (_, fa, fb)) = sface_of_plus m_n fab in
-                let (Val v) = eval (Act (env, op_of_sface fa)) (CubeOf.find doms fb) in
-                v);
+                eval_term (Act (env, op_of_sface fa)) (CubeOf.find doms fb));
           } in
       let cods =
         BindCube.build mn
@@ -208,7 +236,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
               (fun fa ->
                 let k = dom_tface fa in
                 let fa = sface_of_tface fa in
-                let (Val tm) = eval (Act (env, op_of_sface fa)) tm in
+                let tm = eval_term (Act (env, op_of_sface fa)) tm in
                 let ty =
                   inst (universe k)
                     (TubeOf.build D.zero (D.zero_plus k)
@@ -224,13 +252,8 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       Val (Uninst (Pi (x, doms, cods), lazy (inst (universe m) tys)))
   | Let (_, v, body) ->
       let args =
-        CubeOf.build (dim_env env)
-          {
-            build =
-              (fun fa ->
-                let (Val v) = eval (Act (env, op_of_sface fa)) v in
-                v);
-          } in
+        CubeOf.build (dim_env env) { build = (fun fa -> eval_term (Act (env, op_of_sface fa)) v) }
+      in
       eval (Ext (env, CubeOf.singleton args)) body
   (* It's tempting to write just "act_value (eval env x) s" here, but that is WRONG!  Pushing a substitution through an operator action requires whiskering the operator by the dimension of the substitution. *)
   | Act (x, s) ->
@@ -238,8 +261,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       let (Plus km) = D.plus (dom_deg s) in
       let (Plus kn) = D.plus (cod_deg s) in
       let ks = plus_deg k kn km s in
-      let (Val v) = eval env x in
-      Val (act_value v ks)
+      Val (act_value (eval_term env x) ks)
   | Match (ix, n, branches) -> (
       (* Get the argument being inspected *)
       let m = dim_env env in
@@ -261,11 +283,10 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
                   let env = take_args env mn dargs plus in
                   (* Then we proceed recursively with the body of that branch. *)
                   eval (Permute (perm, env)) body
+              (* TODO: Is this case actually a bug, or can it happen? *)
               | _ -> Unrealized))
       | _ -> Unrealized)
-  | Realize tm ->
-      let (Val v) = eval env tm in
-      Realize v
+  | Realize tm -> Realize (eval_term env tm)
   | Canonical c -> Canonical (eval_canonical env c)
 
 (* A helper function that doesn't get the correct types if we define it inline. *)
@@ -282,8 +303,7 @@ and eval_args :
       build =
         (fun fab ->
           let (SFace_of_plus (_, fa, fb)) = sface_of_plus m_n fab in
-          match eval (Act (env, op_of_sface fa)) (CubeOf.find tms fb) with
-          | Val v -> v);
+          eval_term (Act (env, op_of_sface fa)) (CubeOf.find tms fb));
     }
 
 (* Apply a function value to an argument (with its boundaries). *)
@@ -356,8 +376,8 @@ and tyof_app :
           (fun fa [ { tm = afn; ty = _ } ] ->
             let fa = sface_of_tface fa in
             let tmargs = CubeOf.subcube fa args in
-            let (Val tm) = apply afn tmargs in
-            let (Val cod) = apply_binder (BindCube.find cods fa) tmargs in
+            let tm = apply_term afn tmargs in
+            let cod = apply_binder_term (BindCube.find cods fa) tmargs in
             let ty =
               inst cod
                 (TubeOf.build D.zero
@@ -372,8 +392,7 @@ and tyof_app :
             out_tm);
       }
       [ fns ] in
-  let (Val out) = apply_binder (BindCube.find_top cods) args in
-  inst out out_args
+  inst (apply_binder_term (BindCube.find_top cods) args) out_args
 
 (* Compute a field of a structure, at a particular dimension. *)
 and field : type kx ky y. kinetic value -> (D.zero, kx, ky, y) Field.checked -> kinetic value =
@@ -481,7 +500,7 @@ and tyof_field_withname :
               (* TODO: In the higher case, I think we need to readback this and then re-evaluate it in a different environment. *)
               ( Wrap fldname,
                 (* This type is m-dimensional, hence must be instantiated at a full m-tube. *)
-                inst efldty
+                inst (eval_term env fldty)
                   (TubeOf.mmap
                      {
                        map =
@@ -630,7 +649,7 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
       let (Id_ins ins) = id_ins (dim_env env) n in
       let fields =
         Bwd.map
-          (fun (Term.Codatafield { name; plusmap; higher; ty }) ->
+          (fun (Term.Codatafield { name; plusmap = _; higher; ty }) ->
             Value.Codatafield { env; name; higher; ty })
           fields in
       Codata { eta; ins; fields }
@@ -640,12 +659,36 @@ and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =
   let (Val v) = eval env tm in
   v
 
-let apply_term : kinetic value -> ('n, kinetic value) CubeOf.t -> kinetic value =
+and eval_env :
+    type a m n mn b. (m, a) env -> (m, n, mn) D.plus -> (a, n, b) Term.env -> (mn, b) Value.env =
+ fun env m_n tmenv ->
+  let mn = D.plus_out (dim_env env) m_n in
+  match tmenv with
+  | Emp _ -> Emp mn
+  | Ext (tmenv, xss) ->
+      Ext
+        ( eval_env env m_n tmenv,
+          CubeOf.mmap
+            {
+              map =
+                (fun _ [ xs ] ->
+                  CubeOf.build mn
+                    {
+                      build =
+                        (fun fab ->
+                          let (SFace_of_plus (_, fa, fb)) = sface_of_plus m_n fab in
+                          eval_term (Act (env, op_of_sface fa)) (CubeOf.find xs fb));
+                    });
+            }
+            [ xss ] )
+
+and apply_term : type n. kinetic value -> (n, kinetic value) CubeOf.t -> kinetic value =
  fun fn arg ->
   let (Val v) = apply fn arg in
   v
 
-let apply_binder_term : ('n, kinetic) binder -> ('n, kinetic value) CubeOf.t -> kinetic value =
+and apply_binder_term : type n. (n, kinetic) binder -> (n, kinetic value) CubeOf.t -> kinetic value
+    =
  fun b arg ->
   let (Val v) = apply_binder b arg in
   v

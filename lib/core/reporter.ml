@@ -6,7 +6,12 @@ open Uuseg_string
 (* In order to display terms and suchlike in Asai messages, we utilize a double indirection.  Firstly, displaying a term requires "unparsing" it to a parse tree and then printing the parse tree, but parse trees and unparsing aren't defined until the Parser library, which is loaded after Core.  (Displaying a value additionally requires reading it back into a term, which is defined later in Core.)  For this reason, we introduce a wrapper type "printable" that can contain a term, value, etc.  Since terms and values haven't been defined yet in this file, we make "printable" an extensible variant, so they can be added later (in the module Printable) after they are defined.  (They also have to be bundled with their context.) *)
 
 type printable = ..
-type printable += PConstant of Constant.t
+
+type printable +=
+  | PUnit : printable
+  | PString : string -> printable
+  | PConstant of Constant.t
+  | PMeta : ('b, 's) Meta.t -> printable
 
 (* The function that actually does the work of printing a "printable" will be defined in Parser.Unparse.  But we need to be able to "call" that function in this file to define "default_text" that converts structured messages to text.  Thus, in this file we define a mutable global variable to contain that function, starting with a dummy function, and call its value to print "printable"s; then in Parser.Unparse we will set the value of that variable after defining the function it should contain. *)
 
@@ -74,6 +79,7 @@ module Code = struct
     | Unequal_indices : printable * printable -> t
     | Unbound_variable : string -> t
     | Undefined_constant : printable -> t
+    | Undefined_metavariable : printable -> t
     | Nonsynthesizing : string -> t
     | Low_dimensional_argument_of_degeneracy : (string * 'a D.t) -> t
     | Missing_argument_of_degeneracy : string -> t
@@ -88,6 +94,7 @@ module Code = struct
     | Index_variable_in_index_value : t
     | Matching_on_nondatatype : printable -> t
     | Matching_on_let_bound_variable : printable -> t
+    | Matching_on_record_field : Field.t -> t
     | Dimension_mismatch : string * 'a D.t * 'b D.t -> t
     | Invalid_variable_face : 'a D.t * ('n, 'm) sface -> t
     | Unsupported_numeral : Q.t -> t
@@ -122,6 +129,8 @@ module Code = struct
     | Missing_constructor_type : Constr.t -> t
     | Locked_variable : t
     | Locked_axiom : printable -> t
+    | Hole_generated : ('b, 's) Meta.t * printable -> t
+    | Open_holes : t
 
   (** The default severity of messages with a particular message code. *)
   let default_severity : t -> Asai.Diagnostic.severity = function
@@ -159,6 +168,7 @@ module Code = struct
     | Unequal_indices _ -> Error
     | Unbound_variable _ -> Error
     | Undefined_constant _ -> Bug
+    | Undefined_metavariable _ -> Bug
     | No_such_field _ -> Error
     | Nonsynthesizing _ -> Error
     | Low_dimensional_argument_of_degeneracy _ -> Error
@@ -179,6 +189,7 @@ module Code = struct
     | Index_variable_in_index_value -> Error
     | Matching_on_nondatatype _ -> Error
     | Matching_on_let_bound_variable _ -> Error
+    | Matching_on_record_field _ -> Error
     | Dimension_mismatch _ -> Bug (* Sometimes Error? *)
     | Unsupported_numeral _ -> Error
     | Anomaly _ -> Bug
@@ -214,6 +225,8 @@ module Code = struct
     | Invalid_higher_method _ -> Error
     | Locked_variable -> Error
     | Locked_axiom _ -> Error
+    | Hole_generated _ -> Info
+    | Open_holes -> Error
 
   (** A short, concise, ideally Google-able string representation for each message code. *)
   let short_code : t -> string = function
@@ -238,8 +251,9 @@ module Code = struct
     (* Scope errors *)
     | Unbound_variable _ -> "E0300"
     | Undefined_constant _ -> "E0301"
-    | Locked_variable -> "E0302"
-    | Locked_axiom _ -> "E0303"
+    | Undefined_metavariable _ -> "E0302"
+    | Locked_variable -> "E0310"
+    | Locked_axiom _ -> "E0311"
     (* Bidirectional typechecking *)
     | Nonsynthesizing _ -> "E0400"
     | Unequal_synthesized_type _ -> "E0401"
@@ -276,6 +290,7 @@ module Code = struct
     (* - Match variable *)
     | Unnamed_variable_in_match -> "E1100"
     | Matching_on_let_bound_variable _ -> "E1101"
+    | Matching_on_record_field _ -> "E1102"
     (* - Match type *)
     | Matching_on_nondatatype _ -> "E1200"
     | Matching_datatype_has_degeneracy _ -> "E1201"
@@ -322,10 +337,13 @@ module Code = struct
     | Notation_variable_used_twice _ -> "E2209"
     | Unbound_variable_in_notation _ -> "E2210"
     | Head_already_has_notation _ -> "E2211"
+    (* Interactive proof *)
+    | Open_holes -> "E3000"
     (* Information *)
     | Constant_defined _ -> "I0000"
     | Constant_assumed _ -> "I0001"
     | Notation_defined _ -> "I0002"
+    | Hole_generated _ -> "I0100"
     (* Debugging *)
     | Show _ -> "I9999"
 
@@ -437,6 +455,7 @@ module Code = struct
           pp_printed (print t1) pp_printed (print t2)
     | Unbound_variable c -> textf "unbound variable: %s" c
     | Undefined_constant c -> textf "undefined constant: %a" pp_printed (print c)
+    | Undefined_metavariable v -> textf "undefined metavariable: %a" pp_printed (print v)
     | Nonsynthesizing pos -> textf "non-synthesizing term in synthesizing position (%s)" pos
     | Low_dimensional_argument_of_degeneracy (deg, dim) ->
         textf "argument of degeneracy '%s' must be at least %d-dimensional" deg (to_int dim)
@@ -471,6 +490,7 @@ module Code = struct
           (print ty)
     | Matching_on_let_bound_variable name ->
         textf "can't match on let-bound variable %a" pp_printed (print name)
+    | Matching_on_record_field fld -> textf "can't match on record field %s" (Field.to_string fld)
     | Dimension_mismatch (op, a, b) ->
         textf "dimension mismatch in %s (%d ≠ %d)" op (to_int a) (to_int b)
     | Unsupported_numeral n -> textf "unsupported numeral: %a" Q.pp_print n
@@ -539,6 +559,9 @@ module Code = struct
           (Field.string_of_raw fld)
     | Locked_variable -> text "variable locked behind external degeneracy"
     | Locked_axiom a -> textf "axiom %a locked behind external degeneracy" pp_printed (print a)
+    | Hole_generated (n, ty) ->
+        textf "@[<v 0>hole %s generated:@,@,%a@]" (Meta.name n) pp_printed (print ty)
+    | Open_holes -> text "There are open holes"
 end
 
 include Asai.StructuredReporter.Make (Code)
