@@ -44,28 +44,8 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
       BwdM.miterM
         (fun [ (fld, _) ] -> equal_at ctx (field x fld) (field y fld) (tyof_field x ty fld))
         [ fields ]
-  | Neu { alignment = Lawful (Codata { eta = Noeta; fields; _ }); _ } -> (
-      (* At a record-type without eta, two structs are equal if their insertions and corresponding fields are equal, and a struct is not equal to any other term.  We have to handle these cases here, though, because once we get to equal_val we don't have the type information, which is not stored in a struct. *)
-      match (x, y) with
-      | Struct (xfld, xins), Struct (yfld, yins) ->
-          let* () = deg_equiv (perm_of_ins xins) (perm_of_ins yins) in
-          BwdM.miterM
-            (fun [ (fld, _) ] ->
-              let xv =
-                match Abwd.find_opt fld xfld with
-                | Some xv -> xv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val xtm) = Lazy.force (fst xv) in
-              let yv =
-                match Abwd.find_opt fld yfld with
-                | Some yv -> yv
-                | None -> fatal (Anomaly "missing field in equality-check") in
-              let (Val ytm) = Lazy.force (fst yv) in
-              equal_at ctx xtm ytm (tyof_field x ty fld))
-            [ fields ]
-      | Struct _, _ | _, Struct _ -> fail
-      | _ -> equal_val ctx x y)
-  (* At a datatype, two constructors are equal if they are instances of the same constructor, with the same dimension and arguments.  Again, we handle these cases here because we can use the datatype information to give types to the arguments of the constructor.  We require the datatype to be applied to all its indices, and we check the dimension. *)
+  (* At a codatatype without eta, there are no kinetic structs, only comatches, and those are not compared componentwise, only as neutrals, since they are generative, so we don't need a clause for it. *)
+  (* At a datatype, two constructors are equal if they are instances of the same constructor, with the same dimension and arguments.  We handle these cases here because we can use the datatype information to give types to the arguments of the constructor.  We require the datatype to be applied to all its indices, and we check the dimension. *)
   | Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ } -> (
       match (x, y) with
       | Constr (xconstr, xn, xargs), Constr (yconstr, yn, yargs) -> (
