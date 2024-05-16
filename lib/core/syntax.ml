@@ -539,6 +539,14 @@ let rec dim_env : type n b. (n, b) env -> n D.t = function
 let dim_binder : type m s. (m, s) binder -> m D.t = function
   | Bind b -> dom_ins b.ins
 
+(* The length of an environment is a tbwd of dimensions. *)
+let rec length_env : type n b. (n, b) env -> b Plusmap.OfDom.t = function
+  | Emp _ -> Of_emp
+  | Ext (env, x) -> Of_snoc (length_env env, CubeOf.dim x)
+  | Act (env, _) -> length_env env
+  | Permute (p, env) -> Plusmap.OfDom.permute p (length_env env)
+  | Shift (env, mn, nb) -> Plusmap.out (D.plus_right mn) (length_env env) nb
+
 (* Project out a cube or tube of values from a cube or tube of normals *)
 let val_of_norm_cube : type n. (n, normal) CubeOf.t -> (n, kinetic value) CubeOf.t =
  fun arg -> CubeOf.mmap { map = (fun _ [ { tm; ty = _ } ] -> tm) } [ arg ]
