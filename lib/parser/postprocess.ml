@@ -56,7 +56,10 @@ let rec process :
           | Synth vfn -> (
               let fn = { value = vfn; loc = fn.loc } in
               match arg.value with
-              | Field (fld, _) -> { value = Synth (Field (fn, Field.intern_ori fld)); loc }
+              | Field (fld, [], _) -> { value = Synth (Field (fn, Field.intern_ori fld)); loc }
+              | Field (fld, b :: bs, _) ->
+                  fatal
+                    (Unimplemented ("higher fields: " ^ String.concat "." ("" :: fld :: b :: bs)))
               | _ -> { value = Synth (Raw.App (fn, process ctx arg)); loc })
           | Constr (head, args) ->
               let arg = process ctx arg in

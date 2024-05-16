@@ -83,15 +83,15 @@
  1 | .fst x
    ^ parse error
 
- ￫ error[E0203]
+ ￫ error[E0100]
  ￭ user-supplied term
- 1 | x .fs.t y
-   ^ invalid field name: .fs.t
+ 1 | x |-> x .fs.t y
+   ^ higher fields: .fs.t not yet implemented
 
- ￫ error[E0204]
+ ￫ error[E0100]
  ￭ user-supplied term
  1 | f (con.str. x)
-   ^ invalid constructor name: con.str.
+   ^ higher constructors: con.str. not yet implemented
 
  ￫ error[E0300]
  ￭ user-supplied term

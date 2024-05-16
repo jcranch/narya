@@ -659,12 +659,13 @@ let rec process_comatch :
  fun (flds, found) ctx obs loc ->
   match obs with
   | [] -> { value = Raw.Struct (Noeta, flds); loc }
-  | Term { value = Field (x, _); loc } :: Term tm :: obs ->
+  | Term { value = Field (x, [], _); loc } :: Term tm :: obs ->
       let tm = process ctx tm in
       let fld = Field.intern x in
       if Field.Set.mem fld found then fatal ?loc (Duplicate_method_in_comatch fld)
         (* Comatches can't have unlabeled fields *)
       else process_comatch (Abwd.add (Some fld) tm flds, Field.Set.add fld found) ctx obs loc
+  | Term { value = Field (_, _ :: _, _); _ } :: _ :: _ -> fatal (Unimplemented "higher fields")
   | _ :: _ -> fatal (Anomaly "invalid notation arguments for comatch")
 
 let () =
@@ -902,7 +903,12 @@ let rec process_codata :
   | Term
       {
         value =
-          App { fn = { value = x; loc = xloc }; arg = { value = Field (fld, _); loc = fldloc }; _ };
+          App
+            {
+              fn = { value = x; loc = xloc };
+              arg = { value = Field (fld, [], _); loc = fldloc };
+              _;
+            };
         loc;
       }
     :: Term ty
@@ -920,6 +926,8 @@ let rec process_codata :
       | None ->
           let ty = process (Bwv.snoc ctx x) ty in
           process_codata (Abwd.add fld (x, ty) flds) ctx obs loc)
+  | Term { value = App { arg = { value = Field (_, _ :: _, _); _ }; _ }; _ } :: _ :: _ ->
+      fatal (Unimplemented "higher fields")
   | _ :: _ -> fatal (Anomaly "invalid notation arguments for codata")
 
 let () = set_processor codata { process = (fun ctx obs loc _ -> process_codata Emp ctx obs loc) }
