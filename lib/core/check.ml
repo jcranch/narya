@@ -514,7 +514,7 @@ let rec check :
   | Codata fields, UU m, Potential _ -> (
       match D.compare (TubeOf.inst tyargs) m with
       | Neq -> fatal (Dimension_mismatch ("checking codata", TubeOf.inst tyargs, m))
-      | Eq -> check_codata status ctx tyargs Emp (Bwd.to_list fields))
+      | Eq -> check_codata status ctx tyargs Emp Emp (Bwd.to_list fields))
   | Codata _, _, Potential _ ->
       fatal (Checking_canonical_at_nonuniverse ("codatatype", PVal (ctx, ty)))
   | Codata _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "codatatype")
@@ -524,7 +524,7 @@ let rec check :
       | Eq ->
           let dim = TubeOf.inst tyargs in
           let (Vars (af, vars)) = vars_of_vec abc.loc dim abc.value xs in
-          check_record status dim ctx tyargs vars Emp Zero af Emp fields)
+          check_record status dim ctx tyargs vars Emp Zero af Emp Emp fields)
   | Record _, _, Potential _ ->
       fatal (Checking_canonical_at_nonuniverse ("record type", PVal (ctx, ty)))
   | Record _, _, Kinetic -> fatal (Canonical_type_outside_case_tree "record type")
@@ -628,14 +628,15 @@ and with_codata_so_far :
     (a, b) Ctx.t ->
     n D.t ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (Field.t, (b, n) Term.codatafield) Abwd.t ->
+    (Field.t, (b, n) Value.codatafield) Abwd.t ->
     ((n, Ctx.Binding.t) CubeOf.t -> c) ->
     c =
- fun (Potential (name, args, hyp)) eta ctx dim tyargs checked_fields cont ->
+ fun (Potential (name, args, hyp)) eta ctx dim tyargs checked_fields val_fields cont ->
   (* We can always create a constant with the (0,0,0) insertion, even if its dimension is actually higher. *)
   let head = Value.Const { name; ins = zero_ins D.zero } in
   let alignment =
-    Lawful (Codata { eta; env = Ctx.env ctx; ins = zero_ins dim; fields = checked_fields }) in
+    Lawful (Codata { eta; env = Ctx.env ctx; ins = zero_ins dim; fields = val_fields }) in
   let prev_ety =
     Uninst (Neu { head; args; alignment }, Lazy.from_val (inst (universe dim) tyargs)) in
   let _, domvars =
@@ -652,19 +653,21 @@ and check_codata :
     (b, potential) status ->
     (a, b) Ctx.t ->
     (D.zero, n, n, normal) TubeOf.t ->
-    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
-    (Field.t * (string option * a N.suc check located)) list ->
+    (Field.t, (b, n) Term.codatafield) Abwd.t ->
+    (Field.t, (b, n) Value.codatafield) Abwd.t ->
+    (Field.t * a Raw.codatafield) list ->
     (b, potential) term =
- fun status ctx tyargs checked_fields raw_fields ->
+ fun status ctx tyargs checked_fields val_fields raw_fields ->
   let dim = TubeOf.inst tyargs in
   match raw_fields with
   | [] -> Canonical (Codata (Noeta, dim, checked_fields))
-  | (fld, (x, rty)) :: raw_fields ->
-      with_codata_so_far status Noeta ctx dim tyargs checked_fields @@ fun domvars ->
+  | (fld, Codatafield (x, rty)) :: raw_fields ->
+      with_codata_so_far status Noeta ctx dim tyargs checked_fields val_fields @@ fun domvars ->
       let newctx = Ctx.cube_vis ctx x domvars in
       let cty = check Kinetic newctx rty (universe D.zero) in
-      let checked_fields = Snoc (checked_fields, (fld, cty)) in
-      check_codata status ctx tyargs checked_fields raw_fields
+      let checked_fields = Snoc (checked_fields, (fld, Codatafield cty)) in
+      let val_fields = Snoc (val_fields, (fld, Codatafield cty)) in
+      check_codata status ctx tyargs checked_fields val_fields raw_fields
 
 and check_record :
     type a f1 f2 f af d acd b n.
@@ -676,22 +679,24 @@ and check_record :
     (Field.t * string, f2) Bwv.t ->
     (f1, f2, f) N.plus ->
     (a, f, af) N.plus ->
-    (Field.t, ((b, n) snoc, kinetic) term) Abwd.t ->
+    (Field.t, (b, n) Term.codatafield) Abwd.t ->
+    (Field.t, (b, n) Value.codatafield) Abwd.t ->
     (af, d, acd) Raw.tel ->
     (b, potential) term =
- fun status dim ctx tyargs vars ctx_fields fplus af checked_fields raw_fields ->
+ fun status dim ctx tyargs vars ctx_fields fplus af checked_fields val_fields raw_fields ->
   match raw_fields with
   | Emp -> Term.Canonical (Codata (Eta, dim, checked_fields))
   | Ext (None, _, _) -> fatal (Anomaly "unnamed field in check_record")
   | Ext (Some name, rty, raw_fields) ->
-      with_codata_so_far status Eta ctx dim tyargs checked_fields @@ fun domvars ->
+      with_codata_so_far status Eta ctx dim tyargs checked_fields val_fields @@ fun domvars ->
       let newctx = Ctx.vis_fields ctx vars domvars ctx_fields fplus af in
       let cty = check Kinetic newctx rty (universe D.zero) in
       let fld = Field.intern name in
-      let checked_fields = Snoc (checked_fields, (fld, cty)) in
+      let checked_fields = Snoc (checked_fields, (fld, Codatafield cty)) in
+      let val_fields = Snoc (val_fields, (fld, Codatafield cty)) in
       let ctx_fields = Bwv.Snoc (ctx_fields, (fld, name)) in
       check_record status dim ctx tyargs vars ctx_fields (Suc fplus) (Suc af) checked_fields
-        raw_fields
+        val_fields raw_fields
 
 and check_struct :
     type a b c s m n.
@@ -701,7 +706,7 @@ and check_struct :
     (Field.t option, a check located) Abwd.t ->
     kinetic value ->
     m D.t ->
-    (Field.t, ((c, n) snoc, kinetic) term) Abwd.t ->
+    (Field.t, (c, n) Value.codatafield) Abwd.t ->
     (b, s) term =
  fun status eta ctx tms ty dim fields ->
   (* The type of each record field, at which we check the corresponding field supplied in the struct, is the type associated to that field name in general, evaluated at the supplied parameters and at "the term itself".  We don't have the whole term available while typechecking, of course, but we can build a version of it that contains all the previously typechecked fields, which is all we need for a well-typed record.  So we iterate through the fields (in the order specified in the *type*, since that determines the dependencies) while also accumulating the previously typechecked and evaluated fields.  At the end, we throw away the evaluated fields (although as usual, that seems wasteful). *)

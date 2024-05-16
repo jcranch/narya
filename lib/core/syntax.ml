@@ -36,7 +36,7 @@ module Raw = struct
     | Empty_co_match : 'a check
     | Data : (Constr.t, 'a dataconstr located) Abwd.t -> 'a check
     (* A codatatype binds one more "self" variable in the types of each of its fields.  For a higher-dimensional codatatype (like a codata version of Gel), this becomes a cube of variables. *)
-    | Codata : (Field.t, string option * 'a N.suc check located) Abwd.t -> 'a check
+    | Codata : (Field.t, 'a codatafield) Abwd.t -> 'a check
     (* A record type binds its "self" variable namelessly, exposing it to the user by additional variables that are bound locally to its fields.  This can't be "cubeified" as easily, so we allow the user to specify either a single cube variable name (thereby also accidentally giving access to the internal previously unnamed variable) or a list of ordinary variables to be its boundary only.  Thus, in practice below 'c must be a number of faces associated to a dimension, but the parser doesn't know the dimension, so it can't ensure that.  The unnamed internal variable is included as the last one. *)
     | Record :
         ('a, 'c, 'ac) Fwn.bplus located * (string option, 'c) Vec.t * ('ac, 'd, 'acd) tel
@@ -54,6 +54,9 @@ module Raw = struct
         -> 'a branch
 
   and _ dataconstr = Dataconstr : ('a, 'b, 'ab) tel * 'ab check located option -> 'a dataconstr
+
+  (* A field of a codatatype has a specified dimension as well as a self variable and a type.  At the raw level we don't need any more information about higher fields. *)
+  and _ codatafield = Codatafield : string option * 'a N.suc check located -> 'a codatafield
 
   (* An ('a, 'b, 'ab) tel is a raw telescope of length 'b in context 'a, with 'ab = 'a+'b the extended context. *)
   and (_, _, _) tel =
@@ -135,9 +138,7 @@ module rec Term : sig
 
   and _ canonical =
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
-    | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
-        -> 'a canonical
+    | Codata : potential eta * 'n D.t * (Field.t, ('a, 'n) codatafield) Abwd.t -> 'a canonical
 
   and (_, _) dataconstr =
     | Dataconstr : {
@@ -145,6 +146,8 @@ module rec Term : sig
         indices : (('pa, kinetic) term, 'i) Bwv.t;
       }
         -> ('p, 'i) dataconstr
+
+  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
 
   and ('a, 'b, 'ab) tel =
     | Emp : ('a, Fwn.zero, 'a) tel
@@ -208,10 +211,8 @@ end = struct
   and _ canonical =
     (* A datatype stores its family of constructors, and also its number of indices.  (The former is not determined in the latter if there happen to be zero constructors). *)
     | Data : 'i N.t * ('a, 'i) dataconstr Constr.Map.t -> 'a canonical
-    (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields). *)
-    | Codata :
-        potential eta * 'n D.t * (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t
-        -> 'a canonical
+    (* A codatatype has an eta flag, an intrinsic dimension (like Gel), and a family of fields, each with a type that depends on one additional variable belonging to the codatatype itself (usually by way of its previous fields).  We retain the order of the fields by storing them in an Abwd rather than a Map so as to enable positional access as well as named access. *)
+    | Codata : potential eta * 'n D.t * (Field.t, ('a, 'n) codatafield) Abwd.t -> 'a canonical
 
   (* A datatype constructor has a telescope of arguments and a list of index values depending on those arguments. *)
   and (_, _) dataconstr =
@@ -220,6 +221,8 @@ end = struct
         indices : (('pa, kinetic) term, 'i) Bwv.t;
       }
         -> ('p, 'i) dataconstr
+
+  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
 
   (* A telescope is a list of types, each dependent on the previous ones. *)
   and ('a, 'b, 'ab) tel =
@@ -362,7 +365,7 @@ module rec Value : sig
         eta : potential eta;
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.t, ('a, 'n) codatafield) Abwd.t;
       }
         -> canonical
 
@@ -374,6 +377,7 @@ module rec Value : sig
       }
         -> ('m, 'ij) dataconstr
 
+  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
   and normal = { tm : kinetic value; ty : kinetic value }
 
   and (_, _) env =
@@ -493,7 +497,7 @@ end = struct
         env : ('m, 'a) env;
         ins : ('mn, 'm, 'n) insertion;
         (* TODO: When it's used, this should really be a forwards list.  But it's naturally constructed backwards, and it has to be used *as* it's being constructed when typechecking the later terms. *)
-        fields : (Field.t, (('a, 'n) snoc, kinetic) term) Abwd.t;
+        fields : (Field.t, ('a, 'n) codatafield) Abwd.t;
       }
         -> canonical
 
@@ -504,6 +508,8 @@ end = struct
         indices : (('ap, kinetic) term, 'ij) Bwv.t;
       }
         -> ('m, 'ij) dataconstr
+
+  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
 
   (* A "normal form" is a value paired with its type.  The type is used for eta-expansion and equality-checking. *)
   and normal = { tm : kinetic value; ty : kinetic value }
