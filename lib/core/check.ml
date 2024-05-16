@@ -13,6 +13,7 @@ open Act
 open Norm
 open Equal
 open Readback
+open Degctx
 open Printable
 open Asai.Range
 
@@ -661,13 +662,23 @@ and check_codata :
   let dim = TubeOf.inst tyargs in
   match raw_fields with
   | [] -> Canonical (Codata (Noeta, dim, checked_fields))
-  | (fld, Codatafield (x, rty)) :: raw_fields ->
+  | (fld, Codatafield (x, fdim, rty)) :: raw_fields -> (
       with_codata_so_far status Noeta ctx dim tyargs checked_fields val_fields @@ fun domvars ->
       let newctx = Ctx.cube_vis ctx x domvars in
-      let cty = check Kinetic newctx rty (universe D.zero) in
-      let checked_fields = Snoc (checked_fields, (fld, Codatafield cty)) in
-      let val_fields = Snoc (val_fields, (fld, Codatafield cty)) in
-      check_codata status ctx tyargs checked_fields val_fields raw_fields
+      match (D.compare_zero fdim, D.compare_zero (TubeOf.inst tyargs)) with
+      | Zero, _ ->
+          let cty = check Kinetic newctx rty (universe D.zero) in
+          let checked_fields = Snoc (checked_fields, (fld, Lower_codatafield cty)) in
+          let val_fields = Snoc (val_fields, (fld, Codatafield cty)) in
+          check_codata status ctx tyargs checked_fields val_fields raw_fields
+      | Pos pfdim, Zero ->
+          let (Degctx (plusmap, degctx, _)) = degctx newctx fdim in
+          let cty = check Kinetic degctx rty (universe D.zero) in
+          let checked_fields =
+            Snoc (checked_fields, (fld, Higher_codatafield (pfdim, plusmap, cty))) in
+          let val_fields = Snoc (val_fields, (fld, Codatafield (Sorry.e ()))) in
+          check_codata status ctx tyargs checked_fields val_fields raw_fields
+      | Pos _, Pos _ -> fatal (Unimplemented "higher fields in higher-dimensional codatatypes"))
 
 and check_record :
     type a f1 f2 f af d acd b n.
@@ -692,7 +703,7 @@ and check_record :
       let newctx = Ctx.vis_fields ctx vars domvars ctx_fields fplus af in
       let cty = check Kinetic newctx rty (universe D.zero) in
       let fld = Field.intern name in
-      let checked_fields = Snoc (checked_fields, (fld, Codatafield cty)) in
+      let checked_fields = Snoc (checked_fields, (fld, Lower_codatafield cty)) in
       let val_fields = Snoc (val_fields, (fld, Codatafield cty)) in
       let ctx_fields = Bwv.Snoc (ctx_fields, (fld, name)) in
       check_record status dim ctx tyargs vars ctx_fields (Suc fplus) (Suc af) checked_fields

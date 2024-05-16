@@ -68,15 +68,15 @@ module Ordered = struct
         } in
     (newxs, newvals)
 
-  type (_, _, _) degenerate =
-    | Degenerate : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) t * ('k, 'b) env -> ('a, 'b, 'k) degenerate
+  type (_, _, _) degctx =
+    | Degctx : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) t * ('k, 'b) env -> ('a, 'b, 'k) degctx
 
-  let rec degenerate : type a b k. (a, b) t -> k D.t -> (a, b, k) degenerate =
+  let rec degenerate : type a b k. (a, b) t -> k D.t -> (a, b, k) degctx =
    fun ctx k ->
     match ctx with
-    | Emp -> Degenerate (Map_emp, Emp, Emp k)
+    | Emp -> Degctx (Map_emp, Emp, Emp k)
     | Snoc (ctx, entry, ax) ->
-        let (Degenerate (kb, newctx, env)) = degenerate ctx k in
+        let (Degctx (kb, newctx, env)) = degenerate ctx k in
         let mn = Ctx.dim_entry entry in
         let (Plus k_mn) = D.plus mn in
         let newentry, newenv =
@@ -93,16 +93,16 @@ module Ordered = struct
           | Invis xs ->
               let newxs, newval = degenerate_binding (length newctx) k k_mn xs ctx env in
               (Invis newxs, Ext (env, newval)) in
-        Degenerate (Map_snoc (kb, k_mn), Snoc (newctx, newentry, ax), newenv)
+        Degctx (Map_snoc (kb, k_mn), Snoc (newctx, newentry, ax), newenv)
     | Lock ctx ->
-        let (Degenerate (kb, newctx, env)) = degenerate ctx k in
-        Degenerate (kb, Lock newctx, env)
+        let (Degctx (kb, newctx, env)) = degenerate ctx k in
+        Degctx (kb, Lock newctx, env)
 end
 
-type (_, _, _) degenerate =
-  | Degenerate : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) Ctx.t * ('k, 'b) env -> ('a, 'b, 'k) degenerate
+type (_, _, _) degctx =
+  | Degctx : ('k, 'b, 'kb) Plusmap.t * ('a, 'kb) Ctx.t * ('k, 'b) env -> ('a, 'b, 'k) degctx
 
-let degenerate : type a b k. (a, b) Ctx.t -> k D.t -> (a, b, k) degenerate =
+let degctx : type a b k. (a, b) Ctx.t -> k D.t -> (a, b, k) degctx =
  fun (Permute (p, ctx)) k ->
-  let (Degenerate (kb, newctx, env)) = Ordered.degenerate ctx k in
-  Degenerate (kb, Permute (p, newctx), env)
+  let (Degctx (kb, newctx, env)) = Ordered.degenerate ctx k in
+  Degctx (kb, Permute (p, newctx), env)

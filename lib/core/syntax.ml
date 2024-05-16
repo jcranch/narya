@@ -56,7 +56,8 @@ module Raw = struct
   and _ dataconstr = Dataconstr : ('a, 'b, 'ab) tel * 'ab check located option -> 'a dataconstr
 
   (* A field of a codatatype has a specified dimension as well as a self variable and a type.  At the raw level we don't need any more information about higher fields. *)
-  and _ codatafield = Codatafield : string option * 'a N.suc check located -> 'a codatafield
+  and _ codatafield =
+    | Codatafield : string option * 'k D.t * 'a N.suc check located -> 'a codatafield
 
   (* An ('a, 'b, 'ab) tel is a raw telescope of length 'b in context 'a, with 'ab = 'a+'b the extended context. *)
   and (_, _, _) tel =
@@ -147,7 +148,11 @@ module rec Term : sig
       }
         -> ('p, 'i) dataconstr
 
-  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
+  and (_, _) codatafield =
+    | Lower_codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
+    | Higher_codatafield :
+        'k D.pos * ('k, ('a, D.zero) snoc, 'kan) Plusmap.t * ('kan, kinetic) term
+        -> ('a, D.zero) codatafield
 
   and ('a, 'b, 'ab) tel =
     | Emp : ('a, Fwn.zero, 'a) tel
@@ -222,7 +227,13 @@ end = struct
       }
         -> ('p, 'i) dataconstr
 
-  and (_, _) codatafield = Codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
+  (* A codatafield has an intrinsic dimension, and a type that depends on one additional variable, but in a degenerated context.  If it is zero-dimensional, the degeneration does nothing, but we store that case separately so we don't need to construct and carry around lots of trivial Plusmaps. *)
+  and (_, _) codatafield =
+    | Lower_codatafield : (('a, 'n) snoc, kinetic) term -> ('a, 'n) codatafield
+    (* For the present, we don't allow higher fields in higher-dimensional codatatypes, just for simplicity. *)
+    | Higher_codatafield :
+        'k D.pos * ('k, ('a, D.zero) snoc, 'kan) Plusmap.t * ('kan, kinetic) term
+        -> ('a, D.zero) codatafield
 
   (* A telescope is a list of types, each dependent on the previous ones. *)
   and ('a, 'b, 'ab) tel =

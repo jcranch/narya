@@ -1,5 +1,6 @@
 open Bwd
 open Util
+open Dim
 open Postprocess
 open Print
 open Format
@@ -906,7 +907,7 @@ let rec process_codata :
           App
             {
               fn = { value = x; loc = xloc };
-              arg = { value = Field (fld, [], _); loc = fldloc };
+              arg = { value = Field (fstr, fdstr, _); loc = fldloc };
               _;
             };
         loc;
@@ -920,14 +921,15 @@ let rec process_codata :
         | Placeholder _ -> None
         | Ident (x, _) -> fatal ?loc:xloc (Invalid_variable x)
         | _ -> fatal ?loc:xloc Parse_error in
-      let fld = Field.intern fld in
-      match Abwd.find_opt fld flds with
-      | Some _ -> fatal ?loc:fldloc (Duplicate_method_in_codata fld)
-      | None ->
-          let ty = process (Bwv.snoc ctx x) ty in
-          process_codata (Abwd.add fld (Raw.Codatafield (x, ty)) flds) ctx obs loc)
-  | Term { value = App { arg = { value = Field (_, _ :: _, _); _ }; _ }; _ } :: _ :: _ ->
-      fatal (Unimplemented "higher fields")
+      let fld = Field.intern fstr in
+      match dim_of_string (String.concat "" fdstr) with
+      | Some (Any fdim) -> (
+          match Abwd.find_opt fld flds with
+          | Some _ -> fatal ?loc:fldloc (Duplicate_method_in_codata fld)
+          | None ->
+              let ty = process (Bwv.snoc ctx x) ty in
+              process_codata (Abwd.add fld (Raw.Codatafield (x, fdim, ty)) flds) ctx obs loc)
+      | None -> fatal (Invalid_field (String.concat "." ("" :: fstr :: fdstr))))
   | _ :: _ -> fatal (Anomaly "invalid notation arguments for codata")
 
 let () = set_processor codata { process = (fun ctx obs loc _ -> process_codata Emp ctx obs loc) }

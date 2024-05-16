@@ -536,8 +536,11 @@ and eval_canonical : type m a. (m, a) env -> a Term.canonical -> Value.canonical
       Data { dim = dim_env env; indices = Emp; missing = N.zero_plus i; constrs }
   | Codata (eta, n, fields) ->
       let (Id_ins ins) = id_ins (dim_env env) n in
-      let fields =
-        Bwd.map (fun (fld, Term.Codatafield cdf) -> (fld, Value.Codatafield cdf)) fields in
+      let eval_codatafield : type a n. (a, n) Term.codatafield -> (a, n) Value.codatafield =
+        function
+        | Lower_codatafield fty -> Value.Codatafield fty
+        | Higher_codatafield _ -> Value.Codatafield (Sorry.e ()) in
+      let fields = Abwd.map eval_codatafield fields in
       Codata { eta; env; ins; fields }
 
 and eval_term : type m b. (m, b) env -> (b, kinetic) term -> kinetic value =
