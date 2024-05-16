@@ -352,7 +352,10 @@ module Code = struct
     | Invalid_degeneracy str ->
         if str = "" then text "missing degeneracy" else textf "invalid degeneracy: %s" str
     | Invalid_variable_face (k, fa) ->
-        textf "invalid face: %d-dimensional variable has no face %s" (to_int k) (string_of_sface fa)
+        let str = string_of_dim k in
+        textf "invalid face: variable of dimension %s has no face '%s'"
+          (if str = "" then "0" else str)
+          (string_of_sface fa)
     | No_relative_precedence (n1, n2) ->
         textf
           "notations \"%s\" and \"%s\" have no relative precedence or associativity; they can only be combined with parentheses"
@@ -449,7 +452,7 @@ module Code = struct
     | Undefined_metavariable v -> textf "undefined metavariable: %a" pp_printed (print v)
     | Nonsynthesizing pos -> textf "non-synthesizing term in synthesizing position (%s)" pos
     | Low_dimensional_argument_of_degeneracy (deg, dim) ->
-        textf "argument of degeneracy '%s' must be at least %d-dimensional" deg (to_int dim)
+        textf "argument of degeneracy '%s' must have dimension at least %s" deg (string_of_dim dim)
     | Missing_argument_of_degeneracy deg -> textf "missing argument for degeneracy %s" deg
     | Applying_nonfunction_nontype (tm, ty) ->
         textf
@@ -483,7 +486,10 @@ module Code = struct
         textf "can't match on let-bound variable %a" pp_printed (print name)
     | Matching_on_record_field fld -> textf "can't match on record field %s" (Field.to_string fld)
     | Dimension_mismatch (op, a, b) ->
-        textf "dimension mismatch in %s (%d ≠ %d)" op (to_int a) (to_int b)
+        let sa, sb = (string_of_dim a, string_of_dim b) in
+        textf "dimension mismatch in %s (%s ≠ %s)" op
+          (if sa = "" then "0" else sa)
+          (if sb = "" then "0" else sb)
     | Unsupported_numeral n -> textf "unsupported numeral: %a" Q.pp_print n
     | Anomaly str -> textf "anomaly: %s" str
     | No_such_level i -> textf "@[<hov 2>no level variable@ %a@ in context@]" pp_printed (print i)

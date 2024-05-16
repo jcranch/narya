@@ -19,7 +19,10 @@ module Endpoints : sig
   val set_internal : bool -> unit
 end
 
-val to_int : 'a D.t -> int
+type any_dim = Any : 'n D.t -> any_dim
+
+val dim_of_string : string -> any_dim option
+val string_of_dim : 'n D.t -> string
 
 type (_, _) factor = Factor : ('n, 'k, 'nk) D.plus -> ('nk, 'n) factor
 
@@ -550,6 +553,7 @@ module Plusmap : sig
 
   val zerol : 'bs OfDom.t -> (D.zero, 'bs, 'bs) t
   end
+
 (*  *)
 type one
 

@@ -1,8 +1,5 @@
 module D = D
 module Dmap = Util.Nmap
-
-let to_int = D.to_int
-
 module Endpoints = Endpoints
 include Arith
 include Deg
@@ -17,6 +14,13 @@ include Face
 include Op
 include Insertion
 module Plusmap = Plusmap
+
+type any_dim = Any : 'n D.t -> any_dim
+
+let dim_of_string : string -> any_dim option =
+ fun str -> Option.map (fun (Deg.Any s) -> Any (dom_deg s)) (deg_of_string str)
+
+let string_of_dim : type n. n D.t -> string = fun n -> string_of_deg (deg_zero n)
 
 (* ********** Special generators ********** *)
 
