@@ -750,18 +750,11 @@ let () =
       process =
         (fun ctx obs loc _ ->
           match obs with
-          (* The first thing must be a valid local variable or cube variable to match against. *)
-          | Term { value = Ident ([ ident ], _); _ } :: obs -> (
-              match Bwv.find_opt (fun y -> y = Some ident) ctx with
-              | None -> fatal (Unbound_variable ident)
-              | Some (_, x) -> { value = Match ((x, None), process_branches ctx obs); loc })
-          | Term { value = Ident ([ ident; fld ], _); _ } :: obs -> (
-              match (Bwv.find_opt (fun y -> y = Some ident) ctx, Dim.sface_of_string fld) with
-              | Some (_, x), Some fa ->
-                  { value = Match ((x, Some fa), process_branches ctx obs); loc }
-              | None, _ -> fatal (Unbound_variable ident)
-              | _ -> fatal Parse_error)
-          | Term { loc; _ } :: _ -> fatal ?loc Parse_error
+          | Term tm :: obs -> (
+              match (process ctx tm).value with
+              | Synth value ->
+                  { value = Match ({ value; loc = tm.loc }, process_branches ctx obs); loc }
+              | _ -> fatal ?loc:tm.loc (Nonsynthesizing "discriminee of match"))
           | [] -> fatal Parse_error);
     }
 
@@ -776,7 +769,7 @@ let () =
               Lam
                 ( { value = None; loc = None },
                   `Normal,
-                  { value = Match ((Top, None), branches); loc } );
+                  { value = Match ({ value = Var (Top, None); loc = None }, branches); loc } );
             loc;
           });
     }
@@ -1233,11 +1226,11 @@ let rec process_fwd :
     type n. (string option, n) Bwv.t -> observation list -> Asai.Range.t option -> n check located =
  fun ctx obs loc ->
   match obs with
-  | [] -> { value = Constr ({ value = Constr.intern "nil"; loc }, Emp); loc }
+  | [] -> { value = Constr ({ value = Constr.intern "nil"; loc }, []); loc }
   | Term tm :: tms ->
       let cdr = process_fwd ctx tms loc in
       let car = process ctx tm in
-      { value = Constr ({ value = Constr.intern "cons"; loc }, Snoc (Snoc (Emp, car), cdr)); loc }
+      { value = Constr ({ value = Constr.intern "cons"; loc }, [ car; cdr ]); loc }
 
 let rec pp_elts : Format.formatter -> observation list -> Whitespace.alist -> Whitespace.alist =
  fun ppf obs ws ->
@@ -1294,10 +1287,7 @@ let () =
           | [ Term car; Term cdr ] ->
               let car = process ctx car in
               let cdr = process ctx cdr in
-              {
-                value = Constr ({ value = Constr.intern "cons"; loc }, Snoc (Snoc (Emp, car), cdr));
-                loc;
-              }
+              { value = Constr ({ value = Constr.intern "cons"; loc }, [ car; cdr ]); loc }
           | _ -> fatal (Anomaly "invalid notation arguments for cons"));
     }
 
@@ -1334,11 +1324,11 @@ let rec process_bwd :
     =
  fun ctx obs loc ->
   match obs with
-  | Emp -> { value = Constr ({ value = Constr.intern "emp"; loc }, Emp); loc }
+  | Emp -> { value = Constr ({ value = Constr.intern "emp"; loc }, []); loc }
   | Snoc (tms, Term tm) ->
       let rdc = process_bwd ctx tms loc in
-      let rad = process ctx tm in
-      { value = Constr ({ value = Constr.intern "snoc"; loc }, Snoc (Snoc (Emp, rdc), rad)); loc }
+      let rac = process ctx tm in
+      { value = Constr ({ value = Constr.intern "snoc"; loc }, [ rdc; rac ]); loc }
 
 let () =
   set_tree bwd (Closed_entry (eop LBracket (op (Op "<") (inner_lst "<" bwd))));
@@ -1357,10 +1347,7 @@ let () =
           | [ Term rdc; Term rac ] ->
               let rdc = process ctx rdc in
               let rac = process ctx rac in
-              {
-                value = Constr ({ value = Constr.intern "snoc"; loc }, Snoc (Snoc (Emp, rdc), rac));
-                loc;
-              }
+              { value = Constr ({ value = Constr.intern "snoc"; loc }, [ rdc; rac ]); loc }
           | _ -> fatal (Anomaly "invalid notation arguments for snoc"));
     }
 

@@ -80,7 +80,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
           | Canonical c -> Val (Uninst (Neu { head; args = Emp; alignment = Lawful c }, ty))
           (* Since a top-level case tree is in the empty context, it doesn't have't anything to stuck-match against. *)
           | Unrealized -> fatal (Anomaly "true neutral case tree in empty context"))
-      | Axiom -> Val (Uninst (Neu { head; args = Emp; alignment = True }, ty)))
+      | Axiom _ -> Val (Uninst (Neu { head; args = Emp; alignment = True }, ty)))
   | Meta meta -> (
       match Galaxy1.find meta <|> Undefined_metavariable (PMeta meta) with
       | { tm = Some tm; _ } -> eval env tm
@@ -205,7 +205,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
       let m = dim_env env in
       let (Plus m_n) = D.plus n in
       let mn = D.plus_out m m_n in
-      let eargs = Bwd.map (eval_args env m_n mn) args in
+      let eargs = List.map (eval_args env m_n mn) args in
       Val (Constr (constr, mn, eargs))
   | Pi (x, doms, cods) ->
       let n = CubeOf.dim doms in
@@ -266,7 +266,7 @@ let rec eval : type m b s. (m, b) env -> (b, s) term -> s evaluation =
   | Match (ix, n, branches) -> (
       (* Get the argument being inspected *)
       let m = dim_env env in
-      match lookup env ix with
+      match eval_term env ix with
       (* It must be an application of a constructor *)
       | Constr (name, dim, dargs) -> (
           match Constr.Map.find_opt name branches with

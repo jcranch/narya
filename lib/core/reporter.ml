@@ -114,8 +114,8 @@ module Code = struct
     | Notation_variable_used_twice : string -> t
     | Unbound_variable_in_notation : string list -> t
     | Head_already_has_notation : string -> t
-    | Constant_assumed : printable -> t
-    | Constant_defined : printable list -> t
+    | Constant_assumed : printable * int -> t
+    | Constant_defined : printable list * int -> t
     | Notation_defined : string -> t
     | Show : string * printable -> t
     | Comment_end_in_string : t
@@ -129,6 +129,8 @@ module Code = struct
     | Locked_axiom : printable -> t
     | Hole_generated : ('b, 's) Meta.t * printable -> t
     | Open_holes : t
+    | Quit : t
+    | Synthesizing_recursion : printable -> t
 
   (** The default severity of messages with a particular message code. *)
   let default_severity : t -> Asai.Diagnostic.severity = function
@@ -186,8 +188,8 @@ module Code = struct
     | Duplicate_constructor_in_data _ -> Error
     | Index_variable_in_index_value -> Error
     | Matching_on_nondatatype _ -> Error
-    | Matching_on_let_bound_variable _ -> Error
-    | Matching_on_record_field _ -> Error
+    | Matching_on_let_bound_variable _ -> Hint
+    | Matching_on_record_field _ -> Hint
     | Dimension_mismatch _ -> Bug (* Sometimes Error? *)
     | Unsupported_numeral _ -> Error
     | Anomaly _ -> Bug
@@ -223,6 +225,8 @@ module Code = struct
     | Locked_axiom _ -> Error
     | Hole_generated _ -> Info
     | Open_holes -> Error
+    | Quit -> Info
+    | Synthesizing_recursion _ -> Error
 
   (** A short, concise, ideally Google-able string representation for each message code. *)
   let short_code : t -> string = function
@@ -253,6 +257,7 @@ module Code = struct
     (* Bidirectional typechecking *)
     | Nonsynthesizing _ -> "E0400"
     | Unequal_synthesized_type _ -> "E0401"
+    | Synthesizing_recursion _ -> "E0402"
     (* Dimensions *)
     | Dimension_mismatch _ -> "E0500"
     | Not_enough_lambdas _ -> "E0501"
@@ -333,11 +338,14 @@ module Code = struct
     | Head_already_has_notation _ -> "E2211"
     (* Interactive proof *)
     | Open_holes -> "E3000"
-    (* Information *)
+    (* Command success *)
     | Constant_defined _ -> "I0000"
     | Constant_assumed _ -> "I0001"
     | Notation_defined _ -> "I0002"
+    (* Events during command execution *)
     | Hole_generated _ -> "I0100"
+    (* Control of execution *)
+    | Quit -> "I0200"
     (* Debugging *)
     | Show _ -> "I9999"
 
@@ -483,8 +491,9 @@ module Code = struct
         textf "@[<hv 0>can't match on variable belonging to non-datatype@;<1 2>%a@]" pp_printed
           (print ty)
     | Matching_on_let_bound_variable name ->
-        textf "can't match on let-bound variable %a" pp_printed (print name)
-    | Matching_on_record_field fld -> textf "can't match on record field %s" (Field.to_string fld)
+        textf "matching on let-bound variable %a doesn't refine the type" pp_printed (print name)
+    | Matching_on_record_field fld ->
+        textf "matching on record field %s doesn't refine the type" (Field.to_string fld)
     | Dimension_mismatch (op, a, b) ->
         let sa, sb = (string_of_dim a, string_of_dim b) in
         textf "dimension mismatch in %s (%s ≠ %s)" op
@@ -515,13 +524,22 @@ module Code = struct
         textf "unbound variable(s) in notation definition: %s" (String.concat ", " xs)
     | Head_already_has_notation name ->
         textf "replacing printing notation for %s (previous notation will still be parseable)" name
-    | Constant_assumed name -> textf "Axiom %a assumed" pp_printed (print name)
-    | Constant_defined names -> (
+    | Constant_assumed (name, h) ->
+        if h > 1 then textf "Axiom %a assumed, containing %d holes" pp_printed (print name) h
+        else if h = 1 then textf "Axiom %a assumed, containing 1 hole" pp_printed (print name)
+        else textf "Axiom %a assumed" pp_printed (print name)
+    | Constant_defined (names, h) -> (
         match names with
         | [] -> textf "Anomaly: no constant defined"
-        | [ name ] -> textf "Constant %a defined" pp_printed (print name)
+        | [ name ] ->
+            if h > 1 then textf "Constant %a defined, containing %d holes" pp_printed (print name) h
+            else if h = 1 then
+              textf "Constant %a defined, containing 1 hole" pp_printed (print name)
+            else textf "Constant %a defined" pp_printed (print name)
         | _ ->
-            textf "@[<v 2>Constants defined mutually:@,%a@]"
+            (if h > 1 then textf "@[<v 2>Constants defined mutually, containing %d holes:@,%a@]" h
+             else if h = 1 then textf "@[<v 2>Constants defined mutually, containing 1 hole:@,%a@]"
+             else textf "@[<v 2>Constants defined mutually:@,%a@]")
               (fun ppf names ->
                 pp_print_list (fun ppf name -> pp_printed ppf (print name)) ppf names)
               names)
@@ -556,6 +574,9 @@ module Code = struct
     | Hole_generated (n, ty) ->
         textf "@[<v 0>hole %s generated:@,@,%a@]" (Meta.name n) pp_printed (print ty)
     | Open_holes -> text "There are open holes"
+    | Quit -> text "Goodbye!"
+    | Synthesizing_recursion c ->
+        textf "for '%a' to be recursive, it must have a declared type" pp_printed (print c)
 end
 
 include Asai.StructuredReporter.Make (Code)
