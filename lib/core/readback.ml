@@ -8,9 +8,11 @@ open Term
 open Value
 open Inst
 open Domvars
+open Act
 open Norm
 open Printable
 module Binding = Ctx.Binding
+module Display = Algaeff.Reader.Make (Bool)
 
 (* Readback of values to terms.  Closely follows equality-testing in equal.ml, so most comments are omitted.  However, unlike equality-testing and the "readback" in theoretical NbE, this readback does *not* eta-expand functions and tuples.  It is used for (1) displaying terms to the user, who will usually prefer not to see things eta-expanded, and (2) turning values into terms so that we can re-evaluate them in a new environment, for which purpose eta-expansion is irrelevant. *)
 
@@ -33,18 +35,45 @@ and readback_at : type a z. (z, a) Ctx.t -> kinetic value -> kinetic value -> (a
           let output = tyof_app cods tyargs args in
           let body = readback_at newctx (apply_term tm args) output in
           Term.Lam (x, body))
-  | Neu { alignment = Lawful (Codata { eta = Eta; fields = _; _ }); _ }, Struct (tmflds, tmins) ->
-      let fields =
-        Abwd.mapi
-          (fun fld (fldtm, l) ->
-            match Lazy.force fldtm with
-            | Val x -> (readback_at ctx x (tyof_field tm ty fld), l))
-          tmflds in
-      Act (Struct (Eta, cod_left_ins tmins, fields), perm_of_ins tmins)
-  | ( Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ },
-      Constr (xconstr, xn, xargs) ) -> (
+  | Neu { alignment = Lawful (Codata { eta = Eta; opacity; fields; env = _; ins }); _ }, _ -> (
+      let dim = cod_left_ins ins in
+      let readback_at_record tm ty =
+        match (tm, opacity) with
+        (* If the term is a struct, we read back its fields.  Even though this is not technically an eta-expansion, we have to do it here rather than in readback_val because we need the record type to determine the types at which to read back the fields. *)
+        | Struct (tmflds, _), _ ->
+            let fields =
+              Abwd.mapi
+                (fun fld (fldtm, l) ->
+                  (readback_at ctx (force_eval_term fldtm) (tyof_field tm ty fld), l))
+                tmflds in
+            Some (Term.Struct (Eta, dim, fields))
+        (* In addition, if the record type is transparent, or if it's translucent and the term is a tuple in a case tree, and we are reading back for display (rather than for internal typechecking purposes), we do an eta-expanding readback. *)
+        | (_, `Transparent l | Uninst (Neu { alignment = Chaotic _; _ }, _), `Translucent l)
+          when Display.read () ->
+            let fields =
+              Abwd.mapi
+                (fun fld _ -> (readback_at ctx (field tm fld) (tyof_field tm ty fld), l))
+                fields in
+            Some (Struct (Eta, dim, fields))
+        (* If the term is not a struct and the record type is not transparent/translucent, we pass off to synthesizing readback. *)
+        | _ -> None in
+      match is_id_ins ins with
+      | Some () -> (
+          match readback_at_record tm ty with
+          | Some res -> res
+          | None -> readback_val ctx tm)
+      | None -> (
+          (* A nontrivially permuted record is not a record type, but we can permute its arguments to find elements of a record type that we can then eta-expand and re-permute. *)
+          let p = perm_of_ins ins in
+          let pinv = perm_inv p in
+          let ptm = act_value tm pinv in
+          let pty = act_ty tm ty pinv in
+          match readback_at_record ptm pty with
+          | Some res -> Act (res, p)
+          | None -> readback_val ctx tm))
+  | Neu { alignment = Lawful (Data { constrs; _ }); _ }, Constr (xconstr, xn, xargs) -> (
       let (Dataconstr { env; args = argtys; indices = _ }) =
-        Constr.Map.find_opt xconstr constrs <|> Anomaly "constr not found in readback" in
+        Abwd.find_opt xconstr constrs <|> Anomaly "constr not found in readback" in
       match (D.compare xn (TubeOf.inst tyargs), D.compare (TubeOf.inst tyargs) (dim_env env)) with
       | Neq, _ -> fatal (Dimension_mismatch ("reading back constrs", xn, TubeOf.inst tyargs))
       | _, Neq ->
@@ -74,7 +103,6 @@ and readback_at : type a z. (z, a) Ctx.t -> kinetic value -> kinetic value -> (a
 and readback_val : type a z. (z, a) Ctx.t -> kinetic value -> (a, kinetic) term =
  fun n x ->
   match x with
-  | Lazy (lazy x) -> readback_val n x
   | Uninst (u, _) -> readback_uninst n u
   | Inst { tm; dim = _; args; tys = _ } ->
       let tm = readback_uninst n tm in
@@ -113,7 +141,7 @@ and readback_uninst : type a z. (z, a) Ctx.t -> uninst -> (a, kinetic) term =
               perm_of_ins ins ))
         (readback_head ctx head) args
 
-and readback_head : type a k z h. (z, a) Ctx.t -> h head -> (a, kinetic) term =
+and readback_head : type a z. (z, a) Ctx.t -> head -> (a, kinetic) term =
  fun ctx h ->
   match h with
   | Var { level; deg } ->
@@ -126,7 +154,8 @@ and readback_head : type a k z h. (z, a) Ctx.t -> h head -> (a, kinetic) term =
       Act (Const name, deg)
   | Meta { meta; env; ins } ->
       let perm = deg_of_ins ins (plus_of_ins ins) in
-      let (Data { termctx; _ }) = Galaxy.find_opt meta <|> Undefined_metavariable (PMeta meta) in
+      let (Metadef { termctx; _ }) =
+        Global.find_meta_opt meta <|> Undefined_metavariable (PMeta meta) in
       Act (MetaEnv (meta, readback_env ctx env termctx), perm)
 
 and readback_at_tel :
@@ -155,7 +184,7 @@ and readback_at_tel :
                     let fa = sface_of_tface fa in
                     let argty =
                       inst
-                        (eval_term (Act (env, op_of_sface fa)) ty)
+                        (eval_term (act_env env (op_of_sface fa)) ty)
                         (TubeOf.build D.zero
                            (D.zero_plus (dom_sface fa))
                            {
@@ -184,17 +213,18 @@ and readback_env :
  fun ctx env (Permute (_, envctx)) -> readback_ordered_env ctx env envctx
 
 and readback_ordered_env :
-    type n a b c d.
-    (a, b) Ctx.t -> (n, d) Value.env -> (c, d) Termctx.Ordered.t -> (b, n, d) Term.env =
+    type n a b c d. (a, b) Ctx.t -> (n, d) Value.env -> (c, d) Termctx.ordered -> (b, n, d) Term.env
+    =
  fun ctx env envctx ->
   match envctx with
-  | Emp ->
-      let (Emp n) = Permute.env_top env in
-      Emp n
+  | Emp -> Emp (dim_env env)
   | Lock envctx -> readback_ordered_env ctx env envctx
   | Snoc (envctx, entry, _) -> (
-      let (Ext (env', xss)) = Permute.env_top env in
-      let tmenv = readback_ordered_env ctx env' envctx in
+      let (Looked_up (force, Op (fc, fd), xss)) = lookup_cube env Now (id_op (dim_env env)) in
+      let xss =
+        CubeOf.mmap
+          { map = (fun _ [ ys ] -> act_value_cube force (CubeOf.subcube fc ys) fd) }
+          [ xss ] in
       match entry with
       | Vis { bindings; _ } | Invis bindings ->
           let tmxss =
@@ -211,7 +241,7 @@ and readback_ordered_env :
                             let k = dom_sface fb in
                             let ty =
                               inst
-                                (eval_term (Act (env, op_of_sface fb)) ty)
+                                (eval_term (act_env env (op_of_sface fb)) ty)
                                 (TubeOf.build k (D.plus_zero k)
                                    {
                                      build =
@@ -225,7 +255,11 @@ and readback_ordered_env :
                       [ xs ]);
               }
               [ xss ] in
+          let env = remove_env env Now in
+          let tmenv = readback_ordered_env ctx env envctx in
           Ext (tmenv, tmxss))
+
+(* Read back a context of values into a context of terms. *)
 
 let readback_bindings :
     type a b n.
@@ -263,7 +297,7 @@ let readback_entry :
       Vis { dim; plusdim; vars; bindings; hasfields; fields; fplus }
   | Invis bindings -> Invis (readback_bindings ctx bindings)
 
-let rec readback_ordered_ctx : type a b. (a, b) Ctx.Ordered.t -> (a, b) Termctx.Ordered.t = function
+let rec readback_ordered_ctx : type a b. (a, b) Ctx.Ordered.t -> (a, b) Termctx.ordered = function
   | Emp -> Emp
   | Snoc (rest, e, af) as ctx ->
       Snoc (readback_ordered_ctx rest, readback_entry (Ctx.of_ordered ctx) e, af)

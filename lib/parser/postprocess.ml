@@ -71,11 +71,9 @@ let rec process :
   | Field _ -> fatal (Anomaly "field is head")
   | Superscript (Some x, str, _) -> (
       match deg_of_string str with
-      | Some (Any s) -> (
+      | Some (Any s) ->
           let body = process ctx x in
-          match body.value with
-          | Synth arg -> { value = Synth (Act (str, s, { value = arg; loc = body.loc })); loc }
-          | _ -> fatal ?loc:body.loc (Nonsynthesizing "argument of degeneracy"))
+          { value = Synth (Act (str, s, body)); loc }
       | None -> fatal (Invalid_degeneracy str))
   | Superscript (None, _, _) -> fatal (Anomaly "degeneracy is head")
 
@@ -100,11 +98,10 @@ and process_apps :
   match process_head ctx tm with
   | `Deg (str, Any s) -> (
       match args with
-      | (Term arg, loc) :: args -> (
-          match process ctx arg with
-          | { value = Synth arg; _ } ->
-              process_apply ctx { value = Act (str, s, { value = arg; loc }); loc } args
-          | { loc; _ } -> fatal ?loc (Nonsynthesizing "argument of degeneracy"))
+      | (Term arg, loc) :: args ->
+          process_apply ctx
+            { value = Act (str, s, { value = (process ctx arg).value; loc }); loc }
+            args
       | [] -> fatal ?loc:tm.loc (Anomaly "TODO"))
   | `Constr c ->
       let c = { value = c; loc = tm.loc } in
@@ -124,18 +121,13 @@ and process_head :
     (lt, ls, rt, rs) parse located ->
     [ `Deg of string * any_deg | `Constr of Constr.t | `Fn of n synth located ] =
  fun ctx tm ->
-  let process_fn () =
-    let tm = process ctx tm in
-    match tm.value with
-    | Synth value -> `Fn { value; loc = tm.loc }
-    | _ -> fatal (Anomaly "") in
   match tm.value with
   | Constr (ident, _) -> `Constr (Constr.intern ident)
   | Ident ([ str ], _) -> (
       match deg_of_name str with
       | Some s -> `Deg (str, s)
-      | None -> process_fn ())
-  | _ -> process_fn ()
+      | None -> `Fn (process_synth ctx tm "function"))
+  | _ -> `Fn (process_synth ctx tm "function")
 
 and process_apply :
     type n.
@@ -151,6 +143,14 @@ and process_apply :
   | (Term { value = Field (fld, b :: bs, _); _ }, _) :: _ ->
       fatal (Unimplemented ("higher fields: " ^ String.concat "." ("" :: fld :: b :: bs)))
   | (Term arg, loc) :: args -> process_apply ctx { value = Raw.App (fn, process ctx arg); loc } args
+
+and process_synth :
+    type n lt ls rt rs.
+    (string option, n) Bwv.t -> (lt, ls, rt, rs) parse located -> string -> n synth located =
+ fun ctx x str ->
+  match process ctx x with
+  | { value = Synth value; loc } -> { value; loc }
+  | { loc; _ } -> fatal ?loc (Nonsynthesizing str)
 
 type _ processed_tel =
   | Processed_tel : ('n, 'k, 'nk) Raw.tel * (string option, 'nk) Bwv.t -> 'n processed_tel

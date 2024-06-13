@@ -4,10 +4,11 @@ open Dim
 open Core
 open Syntax
 open Term
-open Reporter
 module StringMap = Map.Make (String)
 
 let __DEFAULT_NAME__ = "H"
+let default () = __DEFAULT_NAME__
+let __ANONYMOUS_VARIABLE__ = "_H"
 
 (* Track the used variable names, to generate fresh ones for bound variables if needed. *)
 
@@ -36,7 +37,7 @@ let lookup : type n. n t -> n index -> string list =
         let (SFace_of_plus (_, fb, fc)) = sface_of_plus mn fa in
         match NICubeOf.find xs fc with
         | Some x -> cubevar x fb
-        | None -> fatal (Anomaly "reference to anonymous variable")) in
+        | None -> [ __ANONYMOUS_VARIABLE__ ]) in
   lookup ctx x
 
 (* Look up an index variable together with a field, to find a name for the combination, if there is one. *)
@@ -50,7 +51,7 @@ let lookup_field : type n. n t -> n index -> Field.t -> string list option =
     | Snoc (_, Variables (_, mn, _), fields), Index (Now, fa) ->
         let open Monad.Ops (Monad.Maybe) in
         let (SFace_of_plus (_, fb, fc)) = sface_of_plus mn fa in
-        let* () = is_id_sface fc in
+        let* _ = is_id_sface fc in
         let* y = Abwd.find_opt f fields in
         return (cubevar y fb) in
   lookup ctx x

@@ -6,6 +6,7 @@ open Value
 open Inst
 open Domvars
 open Norm
+open Act
 open Monad.ZeroOps (Monad.Maybe)
 open Bwd
 module ListM = Mlist.Monadic (Monad.Maybe)
@@ -45,12 +46,15 @@ and equal_at : int -> kinetic value -> kinetic value -> kinetic value -> unit op
         (fun [ (fld, _) ] -> equal_at ctx (field x fld) (field y fld) (tyof_field x ty fld))
         [ fields ]
   (* At a codatatype without eta, there are no kinetic structs, only comatches, and those are not compared componentwise, only as neutrals, since they are generative, so we don't need a clause for it. *)
-  (* At a datatype, two constructors are equal if they are instances of the same constructor, with the same dimension and arguments.  We handle these cases here because we can use the datatype information to give types to the arguments of the constructor.  We require the datatype to be applied to all its indices, and we check the dimension. *)
-  | Neu { alignment = Lawful (Data { dim = _; indices = _; missing = Zero; constrs }); _ } -> (
+  (* At a higher-dimensional version of a discrete datatype, any two terms are equal.  Note that we do not check here whether discreteness is on: that affects datatypes when they are *defined*, not when they are used. *)
+  | Neu { alignment = Lawful (Data { dim; discrete; _ }); _ } when discrete && is_pos dim ->
+      return ()
+  (* At an ordinary datatype, two constructors are equal if they are instances of the same constructor, with the same dimension and arguments.  We handle these cases here because we can use the datatype information to give types to the arguments of the constructor.  We require the datatype to be applied to all its indices, and we check the dimension. *)
+  | Neu { alignment = Lawful (Data { constrs; _ }); _ } -> (
       match (x, y) with
       | Constr (xconstr, xn, xargs), Constr (yconstr, yn, yargs) -> (
           let (Dataconstr { env; args = argtys; indices = _ }) =
-            match Constr.Map.find_opt xconstr constrs with
+            match Abwd.find_opt xconstr constrs with
             | Some x -> x
             | None -> fatal (Anomaly "constr not found in equality-check") in
           let* () = guard (xconstr = yconstr) in
@@ -110,6 +114,7 @@ and equal_val : int -> kinetic value -> kinetic value -> unit option =
       | _ -> fail)
   | Lam _, _ | _, Lam _ -> fatal (Anomaly "unexpected lambda in synthesizing equality-check")
   | Struct _, _ | _, Struct _ -> fatal (Anomaly "unexpected struct in synthesizing equality-check")
+  | Constr _, _ | _, Constr _ -> fatal (Anomaly "unexpected constr in synthesizing equality-check")
   | _, _ -> fail
 
 (* Subroutine of equal_val.  Like it, equality of the types is part of the conclusion, not a hypothesis.  *)
@@ -149,7 +154,7 @@ and equal_uninst : int -> uninst -> uninst -> unit option =
   | _ -> fail
 
 (* Synthesizing equality check for heads.  Again equality of types is part of the conclusion, not a hypothesis. *)
-and equal_head : type h1 h2. int -> h1 head -> h2 head -> unit option =
+and equal_head : int -> head -> head -> unit option =
  fun lvl x y ->
   match (x, y) with
   | Var { level = l1; deg = d1 }, Var { level = l2; deg = d2 } ->
@@ -167,8 +172,8 @@ and equal_head : type h1 h2. int -> h1 head -> h2 head -> unit option =
   | Meta { meta = meta1; env = env1; ins = i1 }, Meta { meta = meta2; env = env2; ins = i2 } -> (
       match (Meta.compare meta1 meta2, D.compare (cod_left_ins i1) (cod_left_ins i2)) with
       | Eq, Eq ->
-          let (Data { termctx; _ }) =
-            Galaxy.find_opt meta1 <|> Undefined_metavariable (PMeta meta1) in
+          let (Metadef { termctx; _ }) =
+            Global.find_meta_opt meta1 <|> Undefined_metavariable (PMeta meta1) in
           equal_env lvl env1 env2 termctx
       | _ -> fail)
   | _, _ -> fail
@@ -228,7 +233,7 @@ and equal_at_tel :
                     let fa = sface_of_tface fa in
                     let argty =
                       inst
-                        (eval_term (Act (env, op_of_sface fa)) ty)
+                        (eval_term (act_env env (op_of_sface fa)) ty)
                         (TubeOf.build D.zero
                            (D.zero_plus (dom_sface fa))
                            {
@@ -253,7 +258,7 @@ and equal_env : type a b n. int -> (n, b) env -> (n, b) env -> (a, b) Termctx.t 
  fun lvl env1 env2 (Permute (_, envctx)) -> equal_ordered_env lvl env1 env2 envctx
 
 and equal_ordered_env :
-    type a b n. int -> (n, b) env -> (n, b) env -> (a, b) Termctx.Ordered.t -> unit option =
+    type a b n. int -> (n, b) env -> (n, b) env -> (a, b) Termctx.ordered -> unit option =
  fun lvl env1 env2 envctx ->
   (* Copied from readback_ordered_env *)
   match envctx with
@@ -262,8 +267,18 @@ and equal_ordered_env :
   | Snoc (envctx, entry, _) -> (
       let open Monad.Ops (Monad.Maybe) in
       let open CubeOf.Monadic (Monad.Maybe) in
-      let (Ext (env1', xss1)) = Permute.env_top env1 in
-      let (Ext (env2', xss2)) = Permute.env_top env2 in
+      let (Looked_up (force1, Op (fc1, fd1), xss1)) = lookup_cube env1 Now (id_op (dim_env env1)) in
+      let xss1 =
+        CubeOf.mmap
+          { map = (fun _ [ ys ] -> act_value_cube force1 (CubeOf.subcube fc1 ys) fd1) }
+          [ xss1 ] in
+      let (Looked_up (force2, Op (fc2, fd2), xss2)) = lookup_cube env2 Now (id_op (dim_env env2)) in
+      let xss2 =
+        CubeOf.mmap
+          { map = (fun _ [ ys ] -> act_value_cube force2 (CubeOf.subcube fc2 ys) fd2) }
+          [ xss2 ] in
+      let env1' = remove_env env1 Now in
+      let env2' = remove_env env2 Now in
       let* () = equal_ordered_env lvl env1' env2' envctx in
       match entry with
       | Vis { bindings; _ } | Invis bindings ->
@@ -281,7 +296,7 @@ and equal_ordered_env :
                             let k = dom_sface fb in
                             let ty =
                               inst
-                                (eval_term (Act (env1, op_of_sface fb)) ty)
+                                (eval_term (act_env env1 (op_of_sface fb)) ty)
                                 (TubeOf.build k (D.plus_zero k)
                                    {
                                      build =

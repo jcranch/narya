@@ -139,6 +139,7 @@ module Parse = struct
         match tok with
         | String str -> (
             match Lexer.single str with
+            (* Currently we hard code a `Nobreak after each symbol in a notation. *)
             | Some tok -> Some (`Op (tok, `Nobreak, ws), state)
             | None -> fatal (Invalid_notation_symbol str))
         | _ -> None)
@@ -146,6 +147,7 @@ module Parse = struct
   let pattern_var =
     let* x, ws = ident in
     match x with
+    (* Currently we hard code a `Break after each variable in a notation. *)
     | [ x ] -> return (`Var (x, `Break, ws))
     | _ -> fatal (Invalid_variable x)
 
@@ -295,18 +297,16 @@ let execute : Command.t -> unit = function
           Reporter.fatal_diagnostic d)
       @@ fun () ->
       let (Processed_tel (params, ctx)) = process_tel Emp parameters in
-      Core.Command.execute (Axiom (const, params, process ctx ty));
-      let h = Core.Galaxy.end_command () in
-      emit (Constant_assumed (PConstant const, h))
+      Core.Command.execute (Axiom (const, params, process ctx ty))
   | Def defs ->
-      let [ names; cdefs; printables ] =
+      let [ names; cdefs ] =
         Mlist.pmap
           (fun [ d ] ->
             if Option.is_some (Scope.lookup d.name) then
               emit (Constant_already_defined (String.concat "." d.name));
             let c = Scope.define d.name in
-            [ d.name; (c, d); PConstant c ])
-          [ defs ] (Cons (Cons (Cons Nil))) in
+            [ d.name; (c, d) ])
+          [ defs ] (Cons (Cons Nil)) in
       Reporter.try_with ~fatal:(fun d ->
           List.iter
             (fun c ->
@@ -322,20 +322,21 @@ let execute : Command.t -> unit = function
                 let (Processed_tel (params, ctx)) = process_tel Emp parameters in
                 match ty with
                 | Some (Term ty) ->
-                    Core.Command.Def_check (const, params, process ctx ty, process ctx tm)
+                    ( const,
+                      Core.Command.Def_check { params; ty = process ctx ty; tm = process ctx tm } )
                 | None -> (
                     match process ctx tm with
-                    | { value = Synth tm; loc } -> Def_synth (const, params, { value = tm; loc })
+                    | { value = Synth tm; loc } ->
+                        (const, Def_synth { params; tm = { value = tm; loc } })
                     | _ -> fatal (Nonsynthesizing "body of def without specified type"))))
           cdefs in
-      Core.Command.execute (Def defs);
-      let h = Core.Galaxy.end_command () in
-      emit (Constant_defined (printables, h))
+      Core.Command.execute (Def defs)
   | Echo { tm = Term tm; _ } -> (
       let rtm = process Emp tm in
       match rtm.value with
       | Synth stm ->
-          let ctm, ety = Check.synth Ctx.empty { value = stm; loc = rtm.loc } in
+          Readback.Display.run ~env:true @@ fun () ->
+          let ctm, ety = Check.synth (Kinetic `Nolet) Ctx.empty { value = stm; loc = rtm.loc } in
           let etm = Norm.eval_term (Emp D.zero) ctm in
           let btm = Readback.readback_at Ctx.empty etm ety in
           let bty = Readback.readback_at Ctx.empty ety (Inst.universe D.zero) in
@@ -365,7 +366,7 @@ let execute : Command.t -> unit = function
       @@ fun () ->
       let head =
         match head with
-        | `Constr c -> `Constr (Constr.intern c)
+        | `Constr c -> `Constr (Constr.intern c, List.length args)
         | `Constant c -> (
             match Scope.lookup c with
             | Some c -> `Constant c

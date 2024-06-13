@@ -302,19 +302,12 @@ module Ordered = struct
 
   and env_entry : type a b n. (a, b) t -> (n, Binding.t) CubeOf.t -> (D.zero, (b, n) snoc) env =
    fun ctx v ->
-    Ext
+    LazyExt
       ( env ctx,
         CubeOf.mmap
           (* We wrap the value in a Lazy because it might be Unknown or Delayed, but we don't want an error reported unless such a value is actually *used*. *)
-          { map = (fun _ [ x ] -> CubeOf.singleton (Lazy (lazy (Binding.value x).tm))) }
+          { map = (fun _ [ x ] -> CubeOf.singleton (defer (fun () -> Val (Binding.value x).tm))) }
           [ v ] )
-
-  (* Evaluate a case tree or term in (the environment of) a context.  Thus, replace its De Bruijn indices with De Bruijn levels, and substitute the values of variables with definitions. *)
-  let eval : type a b s. (a, b) t -> (b, s) term -> s evaluation =
-   fun ctx tm -> Norm.eval (env ctx) tm
-
-  let eval_term : type a b. (a, b) t -> (b, kinetic) term -> kinetic value =
-   fun ctx tm -> Norm.eval_term (env ctx) tm
 
   (* Extend a context by one new variable, without a value but with an assigned type. *)
   let ext : type a b. (a, b) t -> string option -> kinetic value -> (a N.suc, (b, D.zero) snoc) t =
@@ -337,6 +330,27 @@ module Ordered = struct
     | Snoc (ctx, Invis bindings, _) when all_free bindings ->
         lam ctx (Lam (singleton_variables (CubeOf.dim bindings) None, tree))
     | _ -> fatal (Anomaly "let-bound variable in Ctx.lam")
+
+  (* Delete some level variables from a context by making their bindings into "unknown".  This will cause readback to raise No_such_level if it encounters one of those variables, which can then be trapped as an occurs-check. *)
+  let rec forget_levels : type a b. (a, b) t -> (level -> bool) -> (a, b) t =
+   fun ctx forget ->
+    let forget_bindings : type n. (n, Binding.t) CubeOf.t -> (n, Binding.t) CubeOf.t =
+     fun bindings ->
+      CubeOf.mmap
+        {
+          map =
+            (fun _ [ b ] ->
+              match Binding.level b with
+              | Some x when forget x -> Binding.unknown ()
+              | _ -> b);
+        }
+        [ bindings ] in
+    match ctx with
+    | Emp -> Emp
+    | Lock ctx -> Lock (forget_levels ctx forget)
+    | Snoc (ctx, Vis ({ bindings; _ } as e), af) ->
+        Snoc (ctx, Vis { e with bindings = forget_bindings bindings }, af)
+    | Snoc (ctx, Invis bindings, af) -> Snoc (ctx, Invis (forget_bindings bindings), af)
 end
 
 (* Now we define contexts that add a permutation of the raw indices. *)
@@ -368,11 +382,10 @@ let apps (Permute (_, ctx)) = Ordered.apps ctx
 let lookup (Permute (p, ctx)) i = Ordered.lookup ctx (N.perm_apply p (fst i), snd i)
 let find_level (Permute (_, ctx)) x = Ordered.find_level ctx x
 let env (Permute (_, ctx)) = Ordered.env ctx
-let eval (Permute (_, ctx)) tm = Ordered.eval ctx tm
-let eval_term (Permute (_, ctx)) tm = Ordered.eval_term ctx tm
 let ext (Permute (p, ctx)) xs ty = Permute (Insert (p, Top), Ordered.ext ctx xs ty)
 let ext_let (Permute (p, ctx)) xs tm = Permute (Insert (p, Top), Ordered.ext_let ctx xs tm)
 let lam (Permute (_, ctx)) tm = Ordered.lam ctx tm
+let forget_levels (Permute (p, ctx)) forget = Permute (p, Ordered.forget_levels ctx forget)
 
 (* Augment an ordered context by the identity permutation *)
 let of_ordered ctx = Permute (N.id_perm (Ordered.raw_length ctx), ctx)
