@@ -24,6 +24,9 @@ type (_, _, _) entry =
       -> ('b, 'f, 'mn) entry
   | Invis : ('n, ('b, 'n) snoc binding) CubeOf.t -> ('b, N.zero, 'n) entry
 
+let dim_entry : type b f m. (b, f, m) entry -> m D.t = function
+  | Vis { bindings; _ } | Invis bindings -> CubeOf.dim bindings
+
 type (_, _) ordered =
   | Emp : (N.zero, emp) ordered
   | Snoc :

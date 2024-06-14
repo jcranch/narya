@@ -304,9 +304,10 @@ module Ordered = struct
    fun ctx v ->
     LazyExt
       ( env ctx,
+        D.zero_plus (CubeOf.dim v),
         CubeOf.mmap
           (* We wrap the value in a Lazy because it might be Unknown or Delayed, but we don't want an error reported unless such a value is actually *used*. *)
-          { map = (fun _ [ x ] -> CubeOf.singleton (defer (fun () -> Val (Binding.value x).tm))) }
+          { map = (fun _ [ x ] -> defer (fun () -> Val (Binding.value x).tm)) }
           [ v ] )
 
   (* Extend a context by one new variable, without a value but with an assigned type. *)

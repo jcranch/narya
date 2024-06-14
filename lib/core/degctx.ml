@@ -19,7 +19,7 @@ module Ordered = struct
       (n, Binding.t) CubeOf.t ->
       (a, b) t ->
       (k, b) env ->
-      (kn, Binding.t) CubeOf.t * (n, (k, kinetic value) CubeOf.t) CubeOf.t =
+      (kn, Binding.t) CubeOf.t * (kn, kinetic value) CubeOf.t =
    fun i k kn xs ctx env ->
     let ctx = Ctx.of_ordered ctx in
     let readbacks =
@@ -53,19 +53,7 @@ module Ordered = struct
                   let ty = Norm.eval_term (Act (env, op_of_sface fa)) ty in
                   Binding.make None { tm; ty });
         } in
-    let newvals =
-      CubeOf.build (D.plus_right kn)
-        {
-          build =
-            (fun fb ->
-              CubeOf.build k
-                {
-                  build =
-                    (fun fa ->
-                      let (Plus ij) = D.plus (dom_sface fb) in
-                      (Binding.value (CubeOf.find newxs (sface_plus_sface fa kn ij fb))).tm);
-                });
-        } in
+    let newvals = CubeOf.mmap { map = (fun _ [ v ] -> (Binding.value v).tm) } [ newxs ] in
     (newxs, newvals)
 
   type (_, _, _) degctx =
@@ -89,10 +77,10 @@ module Ordered = struct
               let bindings, newval = degenerate_binding (length newctx) k k_mn bindings ctx env in
               let hasfields = Ctx.No_fields in
               ( Ctx.Vis { dim = D.plus_out k km; plusdim; vars; bindings; hasfields; fields; fplus },
-                Ext (env, newval) )
+                Ext (env, k_mn, newval) )
           | Invis xs ->
               let newxs, newval = degenerate_binding (length newctx) k k_mn xs ctx env in
-              (Invis newxs, Ext (env, newval)) in
+              (Invis newxs, Ext (env, k_mn, newval)) in
         Degctx (Map_snoc (kb, k_mn), Snoc (newctx, newentry, ax), newenv)
     | Lock ctx ->
         let (Degctx (kb, newctx, env)) = degenerate ctx k in

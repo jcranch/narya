@@ -420,7 +420,7 @@ let rec check :
       | Eq ->
           let dim = TubeOf.inst tyargs in
           let (Vars (af, vars)) = vars_of_vec abc.loc dim abc.value xs in
-          check_record status dim ctx opacity tyargs vars Emp Zero af Emp fields)
+          check_record status dim ctx opacity tyargs vars Emp Zero af Emp Emp fields)
   | Data constrs, _, Potential (_, args, _) ->
       (* For a datatype, the type to check against might not be a universe, it could include indices. *)
       let (Wrap num_indices) = Fwn.of_int (typefam ctx ty) in
@@ -1702,8 +1702,8 @@ and check_at_tel :
         check_at_tel c ctx
           (Ext
              ( env,
-               CubeOf.singleton (TubeOf.plus_cube (val_of_norm_tube tyarg) (CubeOf.singleton etm))
-             ))
+               D.plus_zero (TubeOf.inst tyarg),
+               TubeOf.plus_cube (val_of_norm_tube tyarg) (CubeOf.singleton etm) ))
           tms tys tyargs in
       (newenv, TubeOf.plus_cube ctms (CubeOf.singleton ctm) :: newargs)
   | _ ->

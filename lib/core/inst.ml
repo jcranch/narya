@@ -141,7 +141,7 @@ and norm_of_vals :
       [ tms; tys ] in
   new_tms
 
-(* Require that the supplied list contains exactly b (which is a Fwn) arguments, rearrange each mn-cube argument into an n-cube of m-cubes, and add all of them to the given environment. *)
+(* Require that the supplied list contains exactly b (which is a Fwn) arguments, and add all of the cubes to the given environment. *)
 let rec take_args :
     type m n mn a b ab.
     (m, a) env ->
@@ -150,28 +150,9 @@ let rec take_args :
     (a, b, n, ab) Tbwd.snocs ->
     (m, ab) env =
  fun env mn dargs plus ->
-  let m = dim_env env in
-  let n = D.plus_right mn in
   match (dargs, plus) with
   | [], Zero -> env
-  | arg :: args, Suc plus ->
-      let env =
-        Ext
-          ( env,
-            CubeOf.build n
-              {
-                build =
-                  (fun fb ->
-                    CubeOf.build m
-                      {
-                        build =
-                          (fun fa ->
-                            let (Plus jk) = D.plus (dom_sface fb) in
-                            let fab = sface_plus_sface fa mn jk fb in
-                            CubeOf.find arg fab);
-                      });
-              } ) in
-      take_args env mn args plus
+  | arg :: args, Suc plus -> take_args (Ext (env, mn, arg)) mn args plus
   | _ -> fatal (Anomaly "wrong number of arguments in argument list")
 
 (* The universe of any dimension belongs to an instantiation of itself.  Note that the result is not itself a type (i.e. in the 0-dimensional universe) unless n=0. *)
